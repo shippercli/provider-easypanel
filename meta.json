@@ -1,0 +1,21 @@
+{
+  "name": "EasyPanel",
+  "slug": "easypanel",
+  "logo": "logo.svg",
+  "status": "beta",
+  "statusNote": "Currently in early testing. Some features may not work as expected on all EasyPanel instances.",
+  "description": "Deploy applications across modern hosting environments with support for managed services.",
+  "features": [
+    "Git Source Management",
+    "Application Deployment",
+    "Database Management",
+    "Domain Mapping",
+    "SSL Certificates"
+  ],
+  "config": {
+    "provider": "easypanel",
+    "url": "https://easypanel.example.com",
+    "auth_token": "${EASYPANEL_AUTH_TOKEN}"
+  },
+  "install": "composer require shippercli/provider-easypanel"
+}
