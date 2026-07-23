@@ -2,6 +2,7 @@
   "name": "EasyPanel",
   "slug": "easypanel",
   "logo": "logo.svg",
+  "darkLogo": "logo-dark.svg",
   "status": "beta",
   "statusNote": "Currently in early testing. Some features may not work as expected on all EasyPanel instances.",
   "description": "Deploy applications across modern hosting environments with support for managed services.",
