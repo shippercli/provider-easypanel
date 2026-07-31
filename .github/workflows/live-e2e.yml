@@ -1,0 +1,34 @@
+name: EasyPanel Live E2E
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - composer.json
+      - src/**
+      - tests/live-e2e.php
+
+permissions:
+  contents: read
+
+concurrency:
+  group: easypanel-live-demo
+  cancel-in-progress: false
+
+jobs:
+  deploy-demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EASYPANEL_URL: ${{ secrets.EASYPANEL_URL }}
+      EASYPANEL_AUTH_TOKEN: ${{ secrets.EASYPANEL_AUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - run: composer install --no-interaction --prefer-dist
+      - name: Apply and verify dedicated demo
+        run: php tests/live-e2e.php
