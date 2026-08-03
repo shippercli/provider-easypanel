@@ -4,8 +4,43 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "853121d4ecf071b9d70a0b43c4e866a2",
-    "packages": [],
+    "content-hash": "8f96931f1758ed2e6f7416ed45c78488",
+    "packages": [
+        {
+            "name": "shippercli/contracts",
+            "version": "v1.1.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/shippercli/contracts.git",
+                "reference": "a09d516da61e74461fdce1ef57ddc4c2269b87d6"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/shippercli/contracts/zipball/a09d516da61e74461fdce1ef57ddc4c2269b87d6",
+                "reference": "a09d516da61e74461fdce1ef57ddc4c2269b87d6",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^8.3"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "ShipperCli\\Contracts\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "description": "Contracts and interfaces for Shipper CLI providers",
+            "support": {
+                "issues": "https://github.com/shippercli/contracts/issues",
+                "source": "https://github.com/shippercli/contracts/tree/v1.1.0"
+            },
+            "time": "2026-08-03T12:13:29+00:00"
+        }
+    ],
     "packages-dev": [
         {
             "name": "myclabs/deep-copy",

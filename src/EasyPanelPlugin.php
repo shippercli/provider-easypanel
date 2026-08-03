@@ -10,6 +10,6 @@ final class EasyPanelPlugin implements ShipperPluginInterface
 {
     public function providers(): array
     {
-        return [EasyPanelProvider::class];
+        return ['easypanel' => EasyPanelProvider::class];
     }
 }

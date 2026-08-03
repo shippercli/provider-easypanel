@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace ShipperCli\ProviderEasyPanel;
 
 use ShipperCli\Contracts\DeploymentProviderInterface;
+use ShipperCli\Contracts\ProviderCapabilitiesInterface;
 
-final class EasyPanelProvider implements DeploymentProviderInterface
+final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCapabilitiesInterface
 {
     private const MANAGED_MARKER = 'SHIPPERCLI_MANAGED=1';
 
@@ -27,6 +28,32 @@ final class EasyPanelProvider implements DeploymentProviderInterface
     public function getName(): string
     {
         return 'easypanel';
+    }
+
+    public function capabilities(): array
+    {
+        return [
+            'app_deploy' => ['state' => 'supported'],
+            'domain_management' => ['state' => 'supported'],
+            'ssl' => [
+                'state' => 'partial',
+                'notes' => 'HTTPS is requested through EasyPanel domain configuration; certificate lifecycle details are provider-managed.',
+            ],
+            'env' => ['state' => 'supported'],
+            'profiles' => ['state' => 'supported'],
+            'observability' => [
+                'state' => 'partial',
+                'limitations' => ['Deployment logs are not yet exposed through the provider contract.'],
+            ],
+            'rollback' => ['state' => 'unsupported'],
+            'previews' => [
+                'state' => 'partial',
+                'notes' => 'Preview cleanup is supported when Shipper ownership markers are present.',
+            ],
+            'server_lifecycle' => ['state' => 'unsupported'],
+            'databases' => ['state' => 'unsupported'],
+            'background_workloads' => ['state' => 'unsupported'],
+        ];
     }
 
     public function validate(object $project, object $profile): array

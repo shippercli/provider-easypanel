@@ -13,7 +13,17 @@ final class EasyPanelProviderTest extends TestCase
 {
     public function test_plugin_registers_the_provider(): void
     {
-        self::assertSame([EasyPanelProvider::class], (new EasyPanelPlugin())->providers());
+        self::assertSame(['easypanel' => EasyPanelProvider::class], (new EasyPanelPlugin())->providers());
+    }
+
+    public function test_capabilities_explicitly_describe_supported_and_unsupported_features(): void
+    {
+        $capabilities = (new EasyPanelProvider())->capabilities();
+
+        self::assertSame('supported', $capabilities['app_deploy']['state']);
+        self::assertSame('partial', $capabilities['ssl']['state']);
+        self::assertSame('unsupported', $capabilities['server_lifecycle']['state']);
+        self::assertSame('unsupported', $capabilities['databases']['state']);
     }
 
     public function test_apply_creates_and_deploys_only_the_derived_managed_resources(): void
