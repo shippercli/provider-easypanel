@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ShipperCli\ProviderEasyPanel\Tests;
 
 use PHPUnit\Framework\TestCase;
+use ShipperCli\Contracts\CapabilityManifest;
 use ShipperCli\ProviderEasyPanel\EasyPanelClient;
 use ShipperCli\ProviderEasyPanel\EasyPanelPlugin;
 use ShipperCli\ProviderEasyPanel\EasyPanelProvider;
@@ -13,7 +14,14 @@ final class EasyPanelProviderTest extends TestCase
 {
     public function test_plugin_registers_the_provider(): void
     {
-        self::assertSame([EasyPanelProvider::class], (new EasyPanelPlugin())->providers());
+        self::assertSame(['easypanel' => EasyPanelProvider::class], (new EasyPanelPlugin())->providers());
+    }
+
+    public function test_capability_manifest_conforms_to_the_shared_contract(): void
+    {
+        $capabilities = (new EasyPanelProvider())->capabilities();
+
+        self::assertSame($capabilities, CapabilityManifest::from($capabilities)->toArray());
     }
 
     public function test_apply_creates_and_deploys_only_the_derived_managed_resources(): void
