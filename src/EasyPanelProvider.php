@@ -39,7 +39,7 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
             'env' => ['state' => 'supported'],
             'databases' => ['state' => 'supported'],
             'profiles' => ['state' => 'supported'],
-            'background_workloads' => ['state' => 'unsupported'],
+            'background_workloads' => ['state' => 'partial', 'limitations' => ['Queue workers are provisioned as managed app services; other workload types are not modeled.']],
             'observability' => ['state' => 'partial', 'limitations' => ['Service logs require EasyPanel log aggregation to be enabled.']],
             'rollback' => ['state' => 'unsupported'],
             'previews' => ['state' => 'partial', 'limitations' => ['Profile-specific domains can be deployed, but automated preview cleanup is not implemented.']],
@@ -136,6 +136,7 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
             \assert($source !== null);
             $this->configureSource($client, $projectName, $serviceName, $source, $profile);
             $client->updateEnvironment($projectName, $serviceName, $this->environment($projectName, $profile));
+            $this->applyWorkers($client, $project, $profile, $projectName, $source);
 
             $domain = $this->normalizeDomain($this->profileValue($profile, 'domain'));
             if ($domain !== null && ! $this->domainExists($client->listDomains($projectName, $serviceName), $domain)) {
@@ -201,6 +202,7 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
                 throw new \RuntimeException('Refusing to destroy an EasyPanel service without Shipper ownership markers.');
             }
 
+            $this->destroyWorkers($client, $project, $projectName);
             $this->destroyDatabases($client, $project, $projectName);
             $client->destroyAppService($projectName, $serviceName);
 
@@ -254,6 +256,69 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
                 'env' => self::MANAGED_MARKER."\nSHIPPERCLI_MANAGED_PROJECT={$projectName}",
             ];
             $client->createDatabaseService($type, $projectName, $serviceName, $payload);
+        }
+    }
+
+    /** @param array<string, mixed> $source */
+    private function applyWorkers(EasyPanelClient $client, object $project, object $profile, string $projectName, array $source): void
+    {
+        if (! method_exists($project, 'queues')) {
+            return;
+        }
+
+        foreach ($project->queues() as $name => $queue) {
+            if (method_exists($queue, 'enabled') && ! $queue->enabled()) {
+                continue;
+            }
+            $workerName = 'worker-'.$this->slug((string) $name);
+            $inventory = $client->listProjectsAndServices();
+            $worker = $this->findService($inventory, $projectName, $workerName);
+            if ($worker !== null && ($worker['type'] ?? null) !== 'app') {
+                throw new \RuntimeException("EasyPanel worker service {$workerName} is not an app service.");
+            }
+            if ($worker === null) {
+                $client->createAppService($projectName, $workerName);
+            }
+
+            $this->configureSource($client, $projectName, $workerName, $source, $profile);
+            $client->updateEnvironment($projectName, $workerName, $this->environment($projectName, $profile)."\nSHIPPERCLI_MANAGED_WORKER={$workerName}");
+            $connection = method_exists($queue, 'connection') ? $queue->connection() : 'database';
+            $queueName = method_exists($queue, 'queue') ? $queue->queue() : 'default';
+            $command = "php artisan queue:work {$connection} --queue={$queueName}";
+            if (method_exists($queue, 'sleep')) {
+                $command .= ' --sleep='.$queue->sleep();
+            }
+            if (method_exists($queue, 'maxTries')) {
+                $command .= ' --tries='.$queue->maxTries();
+            }
+            if (method_exists($queue, 'timeout')) {
+                $command .= ' --timeout='.$queue->timeout();
+            }
+            $client->updateAppDeployment($projectName, $workerName, ['command' => $command]);
+            $client->deployAppService($projectName, $workerName);
+        }
+    }
+
+    private function destroyWorkers(EasyPanelClient $client, object $project, string $projectName): void
+    {
+        if (! method_exists($project, 'queues')) {
+            return;
+        }
+
+        $inventory = $client->listProjectsAndServices();
+        foreach ($project->queues() as $name => $queue) {
+            $workerName = 'worker-'.$this->slug((string) $name);
+            if ($this->findService($inventory, $projectName, $workerName) === null) {
+                continue;
+            }
+            $inspected = $client->inspectAppService($projectName, $workerName);
+            $env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
+            if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
+                || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)
+                || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_WORKER='.$workerName)) {
+                throw new \RuntimeException("Refusing to destroy unowned EasyPanel worker service {$workerName}.");
+            }
+            $client->destroyAppService($projectName, $workerName);
         }
     }
 

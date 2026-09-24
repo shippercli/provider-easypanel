@@ -204,6 +204,16 @@ final class EasyPanelClient
         ]);
     }
 
+    /** @param array<string, mixed> $deploy */
+    public function updateAppDeployment(string $projectName, string $serviceName, array $deploy): void
+    {
+        $this->call('services.app.updateDeploy', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+            'deploy' => $deploy,
+        ]);
+    }
+
     /** @param array<string, mixed> $filters @return array<int, array<string, mixed>> */
     public function queryServiceLogs(string $projectName, string $serviceName, array $filters = []): array
     {

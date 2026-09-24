@@ -81,6 +81,25 @@ final class EasyPanelClientTest extends TestCase
         self::assertSame('main', $calls[0][1]['databaseName']);
     }
 
+    public function test_it_updates_an_app_deployment_command_for_workers(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): null {
+                $calls[] = [$procedure, $input];
+
+                return null;
+            },
+        );
+
+        $client->updateAppDeployment('shipper-demo', 'worker-main', ['command' => 'php artisan queue:work']);
+
+        self::assertSame('services.app.updateDeploy', $calls[0][0]);
+        self::assertSame('php artisan queue:work', $calls[0][1]['deploy']['command']);
+    }
+
     public function test_it_redacts_connection_values_from_debug_output(): void
     {
         $client = new EasyPanelClient('https://private-panel.example.com', 'private-token');
