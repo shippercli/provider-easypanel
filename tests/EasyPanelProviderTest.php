@@ -83,6 +83,40 @@ final class EasyPanelProviderTest extends TestCase
         self::assertSame('demo.shippercli.com', $calls[6][1]['host']);
     }
 
+    public function test_apply_provisions_a_configured_database_service(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+                $calls[] = [$procedure, $input];
+
+                return match ($procedure) {
+                    'projects.listProjectsAndServices' => ['projects' => [], 'services' => []],
+                    'domains.listDomains' => [],
+                    default => null,
+                };
+            },
+        );
+        $project = new class {
+            public function name(): string { return 'provider'; }
+            public function repository(): array { return []; }
+            public function databases(): array { return [new class {
+                public function name(): string { return 'main'; }
+                public function user(): string { return 'app'; }
+                public function type(): string { return 'postgresql'; }
+            }]; }
+        };
+        $provider = new EasyPanelProvider($this->config(), $client);
+
+        self::assertTrue($provider->apply($project, $this->profile()));
+        $databaseCall = $calls[array_search('services.postgres.createService', array_column($calls, 0), true)];
+        self::assertSame('db-main', $databaseCall[1]['serviceName']);
+        self::assertSame('app', $databaseCall[1]['user']);
+        self::assertStringContainsString('SHIPPERCLI_MANAGED=1', $databaseCall[1]['env']);
+    }
+
     public function test_destroy_refuses_a_service_without_ownership_markers(): void
     {
         $calls = [];
