@@ -60,6 +60,71 @@ final class EasyPanelClient
         ]);
     }
 
+    public function createBoxService(string $projectName, string $serviceName): void
+    {
+        $this->call('services.box.createService', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+        ]);
+    }
+
+    public function cloneBoxRepository(string $projectName, string $serviceName, string $url, string $branch): void
+    {
+        $this->call('services.box.cloneGitRepository', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+            'url' => $url,
+            'branch' => $branch,
+            'private' => false,
+        ]);
+    }
+
+    public function updateBoxEnvironment(string $projectName, string $serviceName, string $env): void
+    {
+        $this->call('services.box.updateEnv', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+            'env' => $env,
+        ]);
+    }
+
+    /** @param array<int, array<string, mixed>> $scripts */
+    public function updateBoxScripts(string $projectName, string $serviceName, array $scripts): void
+    {
+        $this->call('services.box.updateScripts', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+            'scripts' => $scripts,
+        ]);
+    }
+
+    public function restartBoxService(string $projectName, string $serviceName): void
+    {
+        $this->call('services.box.restartService', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+        ]);
+    }
+
+    /** @return array<string, mixed> */
+    public function inspectBoxService(string $projectName, string $serviceName): array
+    {
+        $data = $this->call('services.box.inspectService', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+        ]);
+
+        return is_array($data) ? $data : [];
+    }
+
+    public function destroyBoxService(string $projectName, string $serviceName): void
+    {
+        $this->call('services.box.destroyService', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+        ]);
+    }
+
     /** @param array<string, mixed> $payload */
     public function createDatabaseService(string $type, string $projectName, string $serviceName, array $payload = []): void
     {

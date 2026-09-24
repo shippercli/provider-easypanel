@@ -58,6 +58,11 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
             $errors = [...$errors, ...$this->validateSource($source)];
         }
 
+        if (method_exists($project, 'cron') && $project->cron() !== []
+            && ! in_array($source['type'] ?? null, ['git', 'github'], true)) {
+            $errors[] = 'EasyPanel cron requires a Git or GitHub source so the scheduler Box service can run the application code.';
+        }
+
         $domain = $this->profileValue($profile, 'domain');
         if ($domain !== null && $domain !== '' && $this->normalizeDomain($domain) === null) {
             $errors[] = 'EasyPanel profile domain must be a valid hostname or URL.';
@@ -137,6 +142,7 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
             $this->configureSource($client, $projectName, $serviceName, $source, $profile);
             $client->updateEnvironment($projectName, $serviceName, $this->environment($projectName, $profile));
             $this->applyWorkers($client, $project, $profile, $projectName, $source);
+            $this->applyCron($client, $project, $profile, $projectName, $source);
 
             $domain = $this->normalizeDomain($this->profileValue($profile, 'domain'));
             if ($domain !== null && ! $this->domainExists($client->listDomains($projectName, $serviceName), $domain)) {
@@ -203,6 +209,7 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
             }
 
             $this->destroyWorkers($client, $project, $projectName);
+            $this->destroyCron($client, $project, $projectName);
             $this->destroyDatabases($client, $project, $projectName);
             $client->destroyAppService($projectName, $serviceName);
 
@@ -320,6 +327,78 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
             }
             $client->destroyAppService($projectName, $workerName);
         }
+    }
+
+    /** @param array<string, mixed> $source */
+    private function applyCron(EasyPanelClient $client, object $project, object $profile, string $projectName, array $source): void
+    {
+        if (! method_exists($project, 'cron') || $project->cron() === []) {
+            return;
+        }
+
+        $serviceName = 'scheduler';
+        $inventory = $client->listProjectsAndServices();
+        $service = $this->findService($inventory, $projectName, $serviceName);
+        if ($service !== null && ($service['type'] ?? null) !== 'box') {
+            throw new \RuntimeException('EasyPanel scheduler service name is already used by a non-Box service.');
+        }
+        $created = $service === null;
+        if ($created) {
+            $client->createBoxService($projectName, $serviceName);
+        }
+
+        $repository = $this->cronRepository($source);
+        if ($created) {
+            $client->cloneBoxRepository($projectName, $serviceName, $repository, $this->profileBranch($profile));
+        }
+        $client->updateBoxEnvironment(
+            $projectName,
+            $serviceName,
+            $this->environment($projectName, $profile)."\nSHIPPERCLI_MANAGED_CRON={$serviceName}",
+        );
+
+        $scripts = [];
+        foreach ($project->cron() as $name => $cron) {
+            if (method_exists($cron, 'enabled') && ! $cron->enabled()) {
+                continue;
+            }
+            $scripts[] = [
+                'name' => $this->slug((string) $name),
+                'content' => method_exists($cron, 'command') ? $cron->command() : '',
+                'schedule' => method_exists($cron, 'frequency') ? $cron->frequency() : 'daily',
+                'enabled' => true,
+            ];
+        }
+        $client->updateBoxScripts($projectName, $serviceName, $scripts);
+        $client->restartBoxService($projectName, $serviceName);
+    }
+
+    /** @param array<string, mixed> $source */
+    private function cronRepository(array $source): string
+    {
+        if (($source['type'] ?? null) === 'git') {
+            return (string) $source['repo'];
+        }
+        return 'https://github.com/'.(string) $source['owner'].'/'.(string) $source['repo'].'.git';
+    }
+
+    private function destroyCron(EasyPanelClient $client, object $project, string $projectName): void
+    {
+        if (! method_exists($project, 'cron') || $project->cron() === []) {
+            return;
+        }
+        $inventory = $client->listProjectsAndServices();
+        if ($this->findService($inventory, $projectName, 'scheduler') === null) {
+            return;
+        }
+        $inspected = $client->inspectBoxService($projectName, 'scheduler');
+        $env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
+        if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
+            || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)
+            || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_CRON=scheduler')) {
+            throw new \RuntimeException('Refusing to destroy an unowned EasyPanel scheduler service.');
+        }
+        $client->destroyBoxService($projectName, 'scheduler');
     }
 
     private function destroyDatabases(EasyPanelClient $client, object $project, string $projectName): void

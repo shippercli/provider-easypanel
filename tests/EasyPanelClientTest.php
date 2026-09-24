@@ -100,6 +100,30 @@ final class EasyPanelClientTest extends TestCase
         self::assertSame('php artisan queue:work', $calls[0][1]['deploy']['command']);
     }
 
+    public function test_it_configures_scheduled_box_scripts(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): null {
+                $calls[] = [$procedure, $input];
+
+                return null;
+            },
+        );
+
+        $client->updateBoxScripts('shipper-demo', 'scheduler', [[
+            'name' => 'reports',
+            'content' => 'php artisan reports:generate',
+            'schedule' => '0 9 * * 1',
+            'enabled' => true,
+        ]]);
+
+        self::assertSame('services.box.updateScripts', $calls[0][0]);
+        self::assertSame('0 9 * * 1', $calls[0][1]['scripts'][0]['schedule']);
+    }
+
     public function test_it_redacts_connection_values_from_debug_output(): void
     {
         $client = new EasyPanelClient('https://private-panel.example.com', 'private-token');
