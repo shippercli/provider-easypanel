@@ -60,6 +60,103 @@ final class EasyPanelClient
         ]);
     }
 
+    public function createBoxService(string $projectName, string $serviceName): void
+    {
+        $this->call('services.box.createService', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+        ]);
+    }
+
+    public function cloneBoxRepository(string $projectName, string $serviceName, string $url, string $branch): void
+    {
+        $this->call('services.box.cloneGitRepository', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+            'url' => $url,
+            'branch' => $branch,
+            'private' => false,
+        ]);
+    }
+
+    public function updateBoxEnvironment(string $projectName, string $serviceName, string $env): void
+    {
+        $this->call('services.box.updateEnv', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+            'env' => $env,
+        ]);
+    }
+
+    /** @param array<int, array<string, mixed>> $scripts */
+    public function updateBoxScripts(string $projectName, string $serviceName, array $scripts): void
+    {
+        $this->call('services.box.updateScripts', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+            'scripts' => $scripts,
+        ]);
+    }
+
+    public function restartBoxService(string $projectName, string $serviceName): void
+    {
+        $this->call('services.box.restartService', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+        ]);
+    }
+
+    /** @return array<string, mixed> */
+    public function inspectBoxService(string $projectName, string $serviceName): array
+    {
+        $data = $this->call('services.box.inspectService', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+        ]);
+
+        return is_array($data) ? $data : [];
+    }
+
+    public function destroyBoxService(string $projectName, string $serviceName): void
+    {
+        $this->call('services.box.destroyService', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+        ]);
+    }
+
+    /** @param array<string, mixed> $payload */
+    public function createDatabaseService(string $type, string $projectName, string $serviceName, array $payload = []): void
+    {
+        $type = $this->databaseType($type);
+        $this->call('services.'.$type.'.createService', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+            ...$payload,
+        ]);
+    }
+
+    /** @return array<string, mixed> */
+    public function inspectDatabaseService(string $type, string $projectName, string $serviceName): array
+    {
+        $type = $this->databaseType($type);
+        $data = $this->call('services.'.$type.'.inspectService', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+        ]);
+
+        return is_array($data) ? $data : [];
+    }
+
+    public function destroyDatabaseService(string $type, string $projectName, string $serviceName): void
+    {
+        $type = $this->databaseType($type);
+        $this->call('services.'.$type.'.destroyService', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+        ]);
+    }
+
     /** @return array<string, mixed> */
     public function inspectAppService(string $projectName, string $serviceName): array
     {
@@ -172,6 +269,33 @@ final class EasyPanelClient
         ]);
     }
 
+    /** @param array<string, mixed> $deploy */
+    public function updateAppDeployment(string $projectName, string $serviceName, array $deploy): void
+    {
+        $this->call('services.app.updateDeploy', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+            'deploy' => $deploy,
+        ]);
+    }
+
+    /** @param array<string, mixed> $filters @return array<int, array<string, mixed>> */
+    public function queryServiceLogs(string $projectName, string $serviceName, array $filters = []): array
+    {
+        $data = $this->call('logs.queryServiceLogs', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+            ...$filters,
+        ]);
+
+        if (! is_array($data)) {
+            return [];
+        }
+
+        $logs = $data['logs'] ?? $data;
+        return is_array($logs) ? array_values(array_filter($logs, 'is_array')) : [];
+    }
+
     public function destroyAppService(string $projectName, string $serviceName): void
     {
         $this->call('services.app.destroyService', [
@@ -248,5 +372,20 @@ final class EasyPanelClient
         }
 
         return null;
+    }
+
+    private function databaseType(string $type): string
+    {
+        $type = strtolower(trim($type));
+        $type = match ($type) {
+            'postgresql' => 'postgres',
+            'mongodb' => 'mongo',
+            default => $type,
+        };
+        if (! in_array($type, ['mysql', 'mariadb', 'postgres', 'mongo', 'redis'], true)) {
+            throw new \InvalidArgumentException('Unsupported EasyPanel database type: '.$type);
+        }
+
+        return $type;
     }
 }

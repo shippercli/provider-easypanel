@@ -57,6 +57,73 @@ final class EasyPanelClientTest extends TestCase
         ], $calls[0]);
     }
 
+    public function test_it_creates_a_database_service_through_the_current_typed_procedure(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): null {
+                $calls[] = [$procedure, $input];
+
+                return null;
+            },
+        );
+
+        $client->createDatabaseService('postgresql', 'shipper-demo', 'db-main', [
+            'databaseName' => 'main',
+            'user' => 'app',
+        ]);
+
+        self::assertSame('services.postgres.createService', $calls[0][0]);
+        self::assertSame('shipper-demo', $calls[0][1]['projectName']);
+        self::assertSame('db-main', $calls[0][1]['serviceName']);
+        self::assertSame('main', $calls[0][1]['databaseName']);
+    }
+
+    public function test_it_updates_an_app_deployment_command_for_workers(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): null {
+                $calls[] = [$procedure, $input];
+
+                return null;
+            },
+        );
+
+        $client->updateAppDeployment('shipper-demo', 'worker-main', ['command' => 'php artisan queue:work']);
+
+        self::assertSame('services.app.updateDeploy', $calls[0][0]);
+        self::assertSame('php artisan queue:work', $calls[0][1]['deploy']['command']);
+    }
+
+    public function test_it_configures_scheduled_box_scripts(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): null {
+                $calls[] = [$procedure, $input];
+
+                return null;
+            },
+        );
+
+        $client->updateBoxScripts('shipper-demo', 'scheduler', [[
+            'name' => 'reports',
+            'content' => 'php artisan reports:generate',
+            'schedule' => '0 9 * * 1',
+            'enabled' => true,
+        ]]);
+
+        self::assertSame('services.box.updateScripts', $calls[0][0]);
+        self::assertSame('0 9 * * 1', $calls[0][1]['scripts'][0]['schedule']);
+    }
+
     public function test_it_redacts_connection_values_from_debug_output(): void
     {
         $client = new EasyPanelClient('https://private-panel.example.com', 'private-token');
