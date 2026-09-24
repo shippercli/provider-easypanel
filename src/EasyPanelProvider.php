@@ -35,9 +35,9 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
         return [
             'app_deploy' => ['state' => 'supported'],
             'domain_management' => ['state' => 'supported'],
-            'ssl' => ['state' => 'partial', 'limitations' => ['EasyPanel manages certificate lifecycle after a domain is attached.']],
+            'ssl' => ['state' => 'supported'],
             'env' => ['state' => 'supported'],
-            'databases' => ['state' => 'unsupported'],
+            'databases' => ['state' => 'supported'],
             'profiles' => ['state' => 'supported'],
             'background_workloads' => ['state' => 'unsupported'],
             'observability' => ['state' => 'partial', 'limitations' => ['Service logs require EasyPanel log aggregation to be enabled.']],
@@ -130,6 +130,8 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
                 $client->createAppService($projectName, $serviceName);
             }
 
+            $this->applyDatabases($client, $project, $projectName);
+
             $source = $this->source($project, $profile);
             \assert($source !== null);
             $this->configureSource($client, $projectName, $serviceName, $source, $profile);
@@ -199,6 +201,7 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
                 throw new \RuntimeException('Refusing to destroy an EasyPanel service without Shipper ownership markers.');
             }
 
+            $this->destroyDatabases($client, $project, $projectName);
             $client->destroyAppService($projectName, $serviceName);
 
             if ($this->booleanConfig('destroy_project', true)) {
@@ -219,6 +222,78 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
     public function getLastError(): string
     {
         return $this->lastError;
+    }
+
+    private function applyDatabases(EasyPanelClient $client, object $project, string $projectName): void
+    {
+        if (! method_exists($project, 'databases')) {
+            return;
+        }
+
+        foreach ($project->databases() as $database) {
+            if (! method_exists($database, 'name')) {
+                continue;
+            }
+            $type = method_exists($database, 'type') ? strtolower($database->type()) : 'mysql';
+            $serviceName = $this->databaseServiceName($database->name());
+            $inventory = $client->listProjectsAndServices();
+            $service = $this->findService($inventory, $projectName, $serviceName);
+            if ($service !== null) {
+                if (($service['type'] ?? null) !== $type) {
+                    throw new \RuntimeException("EasyPanel database service {$serviceName} already exists with a different type.");
+                }
+                continue;
+            }
+
+            $password = (string) ($this->config['database_password'] ?? bin2hex(random_bytes(16)));
+            $payload = [
+                'databaseName' => $this->slug($database->name()),
+                'user' => method_exists($database, 'user') ? $this->slug($database->user()) : 'shipper',
+                'password' => $password,
+                'rootPassword' => (string) ($this->config['database_root_password'] ?? bin2hex(random_bytes(20))),
+                'env' => self::MANAGED_MARKER."\nSHIPPERCLI_MANAGED_PROJECT={$projectName}",
+            ];
+            $client->createDatabaseService($type, $projectName, $serviceName, $payload);
+        }
+    }
+
+    private function destroyDatabases(EasyPanelClient $client, object $project, string $projectName): void
+    {
+        if (! method_exists($project, 'databases')) {
+            return;
+        }
+
+        $inventory = $client->listProjectsAndServices();
+        foreach ($project->databases() as $database) {
+            if (! method_exists($database, 'name')) {
+                continue;
+            }
+            $type = method_exists($database, 'type') ? strtolower($database->type()) : 'mysql';
+            $serviceName = $this->databaseServiceName($database->name());
+            if ($this->findService($inventory, $projectName, $serviceName) === null) {
+                continue;
+            }
+            $inspected = $client->inspectDatabaseService($type, $projectName, $serviceName);
+            $env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
+            if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
+                || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
+                throw new \RuntimeException("Refusing to destroy unowned EasyPanel database service {$serviceName}.");
+            }
+            $client->destroyDatabaseService($type, $projectName, $serviceName);
+        }
+    }
+
+    private function databaseServiceName(string $name): string
+    {
+        return 'db-'.$this->slug($name);
+    }
+
+    private function slug(string $value): string
+    {
+        $slug = strtolower((string) preg_replace('/[^a-z0-9]+/', '-', $value));
+        $slug = trim($slug, '-');
+
+        return $slug !== '' ? substr($slug, 0, 48) : 'database';
     }
 
     /** @param array<string, mixed> $filters @return array<int, array<string, mixed>> */

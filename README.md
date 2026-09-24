@@ -12,14 +12,15 @@ Supported:
 - Inline Dockerfile sources
 - Environment variables
 - Custom domains with EasyPanel-managed HTTPS
+- MySQL, MariaDB, PostgreSQL, MongoDB, and Redis service lifecycle
 - App deployment
 - Service log queries (when EasyPanel log aggregation is enabled)
 - Ownership-guarded service and empty-project cleanup
 
 Not yet supported by the provider:
 
-- Database service lifecycle
 - Rollback
+- Queue and cron orchestration across separate services
 - Resource limits, mounts, and persistent-volume lifecycle
 
 EasyPanel may provide those capabilities in its UI, but this package does not claim support until their API behavior and cleanup semantics have dedicated tests.

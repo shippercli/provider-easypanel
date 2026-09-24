@@ -60,6 +60,38 @@ final class EasyPanelClient
         ]);
     }
 
+    /** @param array<string, mixed> $payload */
+    public function createDatabaseService(string $type, string $projectName, string $serviceName, array $payload = []): void
+    {
+        $type = $this->databaseType($type);
+        $this->call('services.'.$type.'.createService', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+            ...$payload,
+        ]);
+    }
+
+    /** @return array<string, mixed> */
+    public function inspectDatabaseService(string $type, string $projectName, string $serviceName): array
+    {
+        $type = $this->databaseType($type);
+        $data = $this->call('services.'.$type.'.inspectService', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+        ]);
+
+        return is_array($data) ? $data : [];
+    }
+
+    public function destroyDatabaseService(string $type, string $projectName, string $serviceName): void
+    {
+        $type = $this->databaseType($type);
+        $this->call('services.'.$type.'.destroyService', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+        ]);
+    }
+
     /** @return array<string, mixed> */
     public function inspectAppService(string $projectName, string $serviceName): array
     {
@@ -265,5 +297,20 @@ final class EasyPanelClient
         }
 
         return null;
+    }
+
+    private function databaseType(string $type): string
+    {
+        $type = strtolower(trim($type));
+        $type = match ($type) {
+            'postgresql' => 'postgres',
+            'mongodb' => 'mongo',
+            default => $type,
+        };
+        if (! in_array($type, ['mysql', 'mariadb', 'postgres', 'mongo', 'redis'], true)) {
+            throw new \InvalidArgumentException('Unsupported EasyPanel database type: '.$type);
+        }
+
+        return $type;
     }
 }

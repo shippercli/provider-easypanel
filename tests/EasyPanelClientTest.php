@@ -57,6 +57,30 @@ final class EasyPanelClientTest extends TestCase
         ], $calls[0]);
     }
 
+    public function test_it_creates_a_database_service_through_the_current_typed_procedure(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): null {
+                $calls[] = [$procedure, $input];
+
+                return null;
+            },
+        );
+
+        $client->createDatabaseService('postgresql', 'shipper-demo', 'db-main', [
+            'databaseName' => 'main',
+            'user' => 'app',
+        ]);
+
+        self::assertSame('services.postgres.createService', $calls[0][0]);
+        self::assertSame('shipper-demo', $calls[0][1]['projectName']);
+        self::assertSame('db-main', $calls[0][1]['serviceName']);
+        self::assertSame('main', $calls[0][1]['databaseName']);
+    }
+
     public function test_it_redacts_connection_values_from_debug_output(): void
     {
         $client = new EasyPanelClient('https://private-panel.example.com', 'private-token');
