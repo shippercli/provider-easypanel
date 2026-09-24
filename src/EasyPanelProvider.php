@@ -40,7 +40,7 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
             'databases' => ['state' => 'unsupported'],
             'profiles' => ['state' => 'supported'],
             'background_workloads' => ['state' => 'unsupported'],
-            'observability' => ['state' => 'unsupported'],
+            'observability' => ['state' => 'partial', 'limitations' => ['Service logs require EasyPanel log aggregation to be enabled.']],
             'rollback' => ['state' => 'unsupported'],
             'previews' => ['state' => 'partial', 'limitations' => ['Profile-specific domains can be deployed, but automated preview cleanup is not implemented.']],
             'server_lifecycle' => ['state' => 'unsupported'],
@@ -219,6 +219,16 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
     public function getLastError(): string
     {
         return $this->lastError;
+    }
+
+    /** @param array<string, mixed> $filters @return array<int, array<string, mixed>> */
+    public function logs(object $project, object $profile, array $filters = []): array
+    {
+        return $this->getClient()->queryServiceLogs(
+            $this->managedProjectName($project, $profile),
+            $this->serviceName(),
+            $filters,
+        );
     }
 
     protected function getClient(): EasyPanelClient

@@ -172,6 +172,23 @@ final class EasyPanelClient
         ]);
     }
 
+    /** @param array<string, mixed> $filters @return array<int, array<string, mixed>> */
+    public function queryServiceLogs(string $projectName, string $serviceName, array $filters = []): array
+    {
+        $data = $this->call('logs.queryServiceLogs', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+            ...$filters,
+        ]);
+
+        if (! is_array($data)) {
+            return [];
+        }
+
+        $logs = $data['logs'] ?? $data;
+        return is_array($logs) ? array_values(array_filter($logs, 'is_array')) : [];
+    }
+
     public function destroyAppService(string $projectName, string $serviceName): void
     {
         $this->call('services.app.destroyService', [

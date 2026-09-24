@@ -24,6 +24,29 @@ final class EasyPanelProviderTest extends TestCase
         self::assertSame($capabilities, CapabilityManifest::from($capabilities)->toArray());
     }
 
+    public function test_logs_query_uses_the_derived_managed_service(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+                $calls[] = [$procedure, $input];
+                return ['logs' => [['message' => 'ready', 'stream' => 'stdout']]];
+            },
+        );
+        $provider = new EasyPanelProvider($this->config(), $client);
+
+        self::assertSame(
+            [['message' => 'ready', 'stream' => 'stdout']],
+            $provider->logs($this->project(), $this->profile(), ['limit' => 25]),
+        );
+        self::assertSame('logs.queryServiceLogs', $calls[0][0]);
+        self::assertSame('shippercli-demo-provider-v1', $calls[0][1]['projectName']);
+        self::assertSame('web', $calls[0][1]['serviceName']);
+        self::assertSame(25, $calls[0][1]['limit']);
+    }
+
     public function test_apply_creates_and_deploys_only_the_derived_managed_resources(): void
     {
         $calls = [];

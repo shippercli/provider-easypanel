@@ -13,12 +13,12 @@ Supported:
 - Environment variables
 - Custom domains with EasyPanel-managed HTTPS
 - App deployment
+- Service log queries (when EasyPanel log aggregation is enabled)
 - Ownership-guarded service and empty-project cleanup
 
 Not yet supported by the provider:
 
 - Database service lifecycle
-- Deployment logs
 - Rollback
 - Resource limits, mounts, and persistent-volume lifecycle
 
