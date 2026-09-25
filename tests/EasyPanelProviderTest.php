@@ -17,6 +17,14 @@ final class EasyPanelProviderTest extends TestCase
         self::assertSame(['easypanel' => EasyPanelProvider::class], (new EasyPanelPlugin())->providers());
     }
 
+    public function test_composer_manifest_is_discoverable_by_the_cli(): void
+    {
+        $manifest = json_decode((string) file_get_contents(dirname(__DIR__).'/composer.json'), true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertSame('shipper-plugin', $manifest['type'] ?? null);
+        self::assertSame(EasyPanelPlugin::class, $manifest['extra']['shipper-plugin'] ?? null);
+    }
+
     public function test_capability_manifest_conforms_to_the_shared_contract(): void
     {
         $capabilities = (new EasyPanelProvider())->capabilities();

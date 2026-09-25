@@ -1,7 +1,7 @@
 {
   "name": "shippercli/provider-easypanel",
   "description": "Official EasyPanel deployment provider for Shipper CLI.",
-  "type": "library",
+  "type": "shipper-plugin",
   "license": "MIT",
   "require": {
     "php": "^8.3",
@@ -20,8 +20,6 @@
     "test": "phpunit"
   },
   "extra": {
-    "shipper": {
-      "plugin": "ShipperCli\\ProviderEasyPanel\\EasyPanelPlugin"
-    }
+    "shipper-plugin": "ShipperCli\\ProviderEasyPanel\\EasyPanelPlugin"
   }
 }

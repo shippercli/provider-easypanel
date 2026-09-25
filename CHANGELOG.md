@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Declare the package as a `shipper-plugin` with `extra.shipper-plugin`, so the CLI's plugin registry discovers it.
+
 ## 1.0.0 - 2026-07-30
 
 - Implement the EasyPanel tRPC client used by current EasyPanel releases.
