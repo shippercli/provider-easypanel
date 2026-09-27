@@ -37,7 +37,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         return [
             'app_deploy' => ['state' => 'supported'],
             'domain_management' => ['state' => 'supported'],
-            'ssl' => ['state' => 'supported'],
+            'ssl' => ['state' => 'supported', 'limitations' => ['Certificate issuance and renewal are delegated to EasyPanel; Shipper manages the HTTPS domain binding rather than certificate resources.']],
             'env' => ['state' => 'supported'],
             'databases' => ['state' => 'supported'],
             'profiles' => ['state' => 'supported'],
