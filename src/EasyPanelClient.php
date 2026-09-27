@@ -310,6 +310,15 @@ final class EasyPanelClient
         ]);
     }
 
+    public function deleteMount(string $projectName, string $serviceName, int $index): void
+    {
+        $this->call('mounts.deleteMount', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+            'index' => $index,
+        ]);
+    }
+
     /** @param array<string, mixed> $filters @return array<int, array<string, mixed>> */
     public function queryServiceLogs(string $projectName, string $serviceName, array $filters = []): array
     {

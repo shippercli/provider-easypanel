@@ -306,20 +306,48 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
         }
 
         $mounts = $this->config['mounts'] ?? [];
-        if (! is_array($mounts) || $mounts === []) {
+        if (! is_array($mounts)) {
             return;
         }
 
         $inspected = $client->inspectAppService($projectName, $serviceName);
+        $env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
+        if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
+            || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
+            throw new \RuntimeException('Refusing to reconcile mounts on an unowned EasyPanel service.');
+        }
         $existing = is_array($inspected['mounts'] ?? null) ? array_values($inspected['mounts']) : [];
-        foreach (array_values($mounts) as $index => $mount) {
+        $desired = [];
+        foreach (array_values($mounts) as $mount) {
             if (! is_array($mount) || ! isset($mount['mountPath'])) {
                 throw new \RuntimeException('Each EasyPanel mount must define mountPath and values.');
             }
-            if (isset($existing[$index]) && is_array($existing[$index])) {
-                $client->updateMount($projectName, $serviceName, $index, $mount);
-            } else {
+
+            $desired[] = $mount;
+        }
+
+        $matched = [];
+        foreach ($desired as $mount) {
+            $index = null;
+            foreach ($existing as $existingIndex => $current) {
+                if (is_array($current) && ($current['mountPath'] ?? null) === $mount['mountPath']) {
+                    $index = $existingIndex;
+                    break;
+                }
+            }
+
+            if ($index === null) {
                 $client->createMount($projectName, $serviceName, $mount);
+                continue;
+            }
+
+            $matched[$index] = true;
+            $client->updateMount($projectName, $serviceName, $index, $mount);
+        }
+
+        foreach (array_keys($existing) as $index) {
+            if (! isset($matched[$index]) && isset($existing[$index]) && is_array($existing[$index])) {
+                $client->deleteMount($projectName, $serviceName, (int) $index);
             }
         }
     }
