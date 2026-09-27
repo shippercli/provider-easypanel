@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace ShipperCli\ProviderEasyPanel;
 
 use ShipperCli\Contracts\DeploymentProviderInterface;
+use ShipperCli\Contracts\DeploymentLogsProviderInterface;
+use ShipperCli\Contracts\DeploymentStatusProviderInterface;
 use ShipperCli\Contracts\ProviderCapabilitiesInterface;
 
-final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCapabilitiesInterface
+final class EasyPanelProvider implements DeploymentLogsProviderInterface, DeploymentProviderInterface, DeploymentStatusProviderInterface, ProviderCapabilitiesInterface
 {
     private const MANAGED_MARKER = 'SHIPPERCLI_MANAGED=1';
 
@@ -35,12 +37,12 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
         return [
             'app_deploy' => ['state' => 'supported'],
             'domain_management' => ['state' => 'supported'],
-            'ssl' => ['state' => 'partial', 'limitations' => ['EasyPanel manages certificate lifecycle after a domain is attached.']],
+            'ssl' => ['state' => 'supported', 'limitations' => ['Certificate issuance and renewal are delegated to EasyPanel; Shipper manages the HTTPS domain binding rather than certificate resources.']],
             'env' => ['state' => 'supported'],
-            'databases' => ['state' => 'unsupported'],
+            'databases' => ['state' => 'supported'],
             'profiles' => ['state' => 'supported'],
-            'background_workloads' => ['state' => 'unsupported'],
-            'observability' => ['state' => 'unsupported'],
+            'background_workloads' => ['state' => 'partial', 'limitations' => ['Queue workers are provisioned as managed app services; other workload types are not modeled.']],
+            'observability' => ['state' => 'partial', 'limitations' => ['Service logs require EasyPanel log aggregation to be enabled.']],
             'rollback' => ['state' => 'unsupported'],
             'previews' => ['state' => 'partial', 'limitations' => ['Profile-specific domains can be deployed, but automated preview cleanup is not implemented.']],
             'server_lifecycle' => ['state' => 'unsupported'],
@@ -56,6 +58,11 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
             $errors[] = 'EasyPanel source is required. Configure an image, Git repository, GitHub repository, or Dockerfile.';
         } else {
             $errors = [...$errors, ...$this->validateSource($source)];
+        }
+
+        if (method_exists($project, 'cron') && $project->cron() !== []
+            && ! in_array($source['type'] ?? null, ['git', 'github'], true)) {
+            $errors[] = 'EasyPanel cron requires a Git or GitHub source so the scheduler Box service can run the application code.';
         }
 
         $domain = $this->profileValue($profile, 'domain');
@@ -130,10 +137,14 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
                 $client->createAppService($projectName, $serviceName);
             }
 
+            $databaseEnvironment = $this->applyDatabases($client, $project, $projectName);
+
             $source = $this->source($project, $profile);
             \assert($source !== null);
             $this->configureSource($client, $projectName, $serviceName, $source, $profile);
-            $client->updateEnvironment($projectName, $serviceName, $this->environment($projectName, $profile));
+            $client->updateEnvironment($projectName, $serviceName, $this->environment($projectName, $profile, $databaseEnvironment));
+            $this->applyWorkers($client, $project, $profile, $projectName, $source, $databaseEnvironment);
+            $this->applyCron($client, $project, $profile, $projectName, $source, $databaseEnvironment);
 
             $domain = $this->normalizeDomain($this->profileValue($profile, 'domain'));
             if ($domain !== null && ! $this->domainExists($client->listDomains($projectName, $serviceName), $domain)) {
@@ -199,6 +210,9 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
                 throw new \RuntimeException('Refusing to destroy an EasyPanel service without Shipper ownership markers.');
             }
 
+            $this->destroyWorkers($client, $project, $projectName);
+            $this->destroyCron($client, $project, $projectName);
+            $this->destroyDatabases($client, $project, $projectName);
             $client->destroyAppService($projectName, $serviceName);
 
             if ($this->booleanConfig('destroy_project', true)) {
@@ -219,6 +233,322 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
     public function getLastError(): string
     {
         return $this->lastError;
+    }
+
+    /** @return array<string, string> */
+    private function applyDatabases(EasyPanelClient $client, object $project, string $projectName): array
+    {
+        if (! method_exists($project, 'databases')) {
+            return [];
+        }
+
+        $environment = [];
+        foreach ($project->databases() as $database) {
+            if (! method_exists($database, 'name')) {
+                continue;
+            }
+            $type = $this->databaseType($database);
+            $serviceName = $this->databaseServiceName($database->name());
+            $inventory = $client->listProjectsAndServices();
+            $service = $this->findService($inventory, $projectName, $serviceName);
+            if ($service !== null) {
+                if (($service['type'] ?? null) !== $type) {
+                    throw new \RuntimeException("EasyPanel database service {$serviceName} already exists with a different type.");
+                }
+                continue;
+            }
+
+            $password = (string) ($this->config['database_password'] ?? bin2hex(random_bytes(16)));
+            $databaseName = $this->databaseIdentifier($database->name());
+            $username = method_exists($database, 'user') ? $this->databaseIdentifier($database->user()) : 'shipper';
+            $payload = [
+                'databaseName' => $databaseName,
+                'user' => $username,
+                'password' => $password,
+                'rootPassword' => (string) ($this->config['database_root_password'] ?? bin2hex(random_bytes(20))),
+                'env' => self::MANAGED_MARKER."\nSHIPPERCLI_MANAGED_PROJECT={$projectName}",
+            ];
+            $client->createDatabaseService($type, $projectName, $serviceName, $payload);
+
+            if ($environment === []) {
+                $environment = [
+                    'DB_HOST' => $serviceName,
+                    'DB_DATABASE' => $databaseName,
+                    'DB_USERNAME' => $username,
+                    'DB_PASSWORD' => $password,
+                ];
+            }
+        }
+
+        return $environment;
+    }
+
+    /** @param array<string, mixed> $source */
+    /** @param array<string, string> $databaseEnvironment */
+    private function applyWorkers(EasyPanelClient $client, object $project, object $profile, string $projectName, array $source, array $databaseEnvironment = []): void
+    {
+        if (! method_exists($project, 'queues')) {
+            return;
+        }
+
+        foreach ($project->queues() as $name => $queue) {
+            if (method_exists($queue, 'enabled') && ! $queue->enabled()) {
+                continue;
+            }
+            $workerName = 'worker-'.$this->slug((string) $name);
+            $inventory = $client->listProjectsAndServices();
+            $worker = $this->findService($inventory, $projectName, $workerName);
+            if ($worker !== null && ($worker['type'] ?? null) !== 'app') {
+                throw new \RuntimeException("EasyPanel worker service {$workerName} is not an app service.");
+            }
+            if ($worker === null) {
+                $client->createAppService($projectName, $workerName);
+            }
+
+            $this->configureSource($client, $projectName, $workerName, $source, $profile);
+            $client->updateEnvironment($projectName, $workerName, $this->environment($projectName, $profile, $databaseEnvironment)."\nSHIPPERCLI_MANAGED_WORKER={$workerName}");
+            $connection = method_exists($queue, 'connection') ? $queue->connection() : 'database';
+            $queueName = method_exists($queue, 'queue') ? $queue->queue() : 'default';
+            $command = "php artisan queue:work {$connection} --queue={$queueName}";
+            if (method_exists($queue, 'sleep')) {
+                $command .= ' --sleep='.$queue->sleep();
+            }
+            if (method_exists($queue, 'maxTries')) {
+                $command .= ' --tries='.$queue->maxTries();
+            }
+            if (method_exists($queue, 'timeout')) {
+                $command .= ' --timeout='.$queue->timeout();
+            }
+            $client->updateAppDeployment($projectName, $workerName, ['command' => $command]);
+            $client->deployAppService($projectName, $workerName);
+        }
+    }
+
+    private function destroyWorkers(EasyPanelClient $client, object $project, string $projectName): void
+    {
+        if (! method_exists($project, 'queues')) {
+            return;
+        }
+
+        $inventory = $client->listProjectsAndServices();
+        foreach ($project->queues() as $name => $queue) {
+            $workerName = 'worker-'.$this->slug((string) $name);
+            if ($this->findService($inventory, $projectName, $workerName) === null) {
+                continue;
+            }
+            $inspected = $client->inspectAppService($projectName, $workerName);
+            $env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
+            if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
+                || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)
+                || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_WORKER='.$workerName)) {
+                throw new \RuntimeException("Refusing to destroy unowned EasyPanel worker service {$workerName}.");
+            }
+            $client->destroyAppService($projectName, $workerName);
+        }
+    }
+
+    /** @param array<string, mixed> $source */
+    /** @param array<string, string> $databaseEnvironment */
+    private function applyCron(EasyPanelClient $client, object $project, object $profile, string $projectName, array $source, array $databaseEnvironment = []): void
+    {
+        if (! method_exists($project, 'cron') || $project->cron() === []) {
+            return;
+        }
+
+        $serviceName = 'scheduler';
+        $inventory = $client->listProjectsAndServices();
+        $service = $this->findService($inventory, $projectName, $serviceName);
+        if ($service !== null && ($service['type'] ?? null) !== 'box') {
+            throw new \RuntimeException('EasyPanel scheduler service name is already used by a non-Box service.');
+        }
+        if ($service === null) {
+            $client->createBoxService($projectName, $serviceName);
+        }
+
+        $repository = $this->cronRepository($source);
+        $client->cloneBoxRepository(
+            $projectName,
+            $serviceName,
+            $repository,
+            $this->profileBranch($profile),
+            $this->privateRepository($source),
+        );
+        $client->updateBoxEnvironment(
+            $projectName,
+            $serviceName,
+            $this->environment($projectName, $profile, $databaseEnvironment)."\nSHIPPERCLI_MANAGED_CRON={$serviceName}",
+        );
+
+        $scripts = [];
+        foreach ($project->cron() as $name => $cron) {
+            if (method_exists($cron, 'enabled') && ! $cron->enabled()) {
+                continue;
+            }
+            $scripts[] = [
+                'name' => $this->slug((string) $name),
+                'content' => method_exists($cron, 'command') ? $cron->command() : '',
+                'schedule' => $this->cronSchedule(method_exists($cron, 'frequency') ? $cron->frequency() : 'daily'),
+                'enabled' => true,
+                'webhookToken' => $this->cronWebhookToken($projectName, (string) $name),
+            ];
+        }
+        $client->updateBoxScripts($projectName, $serviceName, $scripts);
+        $client->restartBoxService($projectName, $serviceName);
+    }
+
+    private function cronSchedule(string $frequency): string
+    {
+        $frequency = trim($frequency);
+        if ($frequency === '') {
+            throw new \RuntimeException('EasyPanel cron frequency must be a cron expression or a supported alias.');
+        }
+
+        if (preg_match('/^\S+\s+\S+\s+\S+\s+\S+\s+\S+$/', $frequency) === 1) {
+            return $frequency;
+        }
+
+        return match (strtolower($frequency)) {
+            'every_minute', 'every-minute', 'minutely' => '* * * * *',
+            'hourly' => '0 * * * *',
+            'daily' => '0 0 * * *',
+            'weekly' => '0 0 * * 0',
+            'monthly' => '0 0 1 * *',
+            'yearly', 'annually' => '0 0 1 1 *',
+            default => throw new \RuntimeException("Unsupported EasyPanel cron frequency: {$frequency}. Use a five-field cron expression."),
+        };
+    }
+
+    /** @param array<string, mixed> $source */
+    private function cronRepository(array $source): string
+    {
+        if (($source['type'] ?? null) === 'git') {
+            return (string) $source['repo'];
+        }
+        return 'https://github.com/'.(string) $source['owner'].'/'.(string) $source['repo'].'.git';
+    }
+
+    private function destroyCron(EasyPanelClient $client, object $project, string $projectName): void
+    {
+        if (! method_exists($project, 'cron') || $project->cron() === []) {
+            return;
+        }
+        $inventory = $client->listProjectsAndServices();
+        if ($this->findService($inventory, $projectName, 'scheduler') === null) {
+            return;
+        }
+        $inspected = $client->inspectBoxService($projectName, 'scheduler');
+        $env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
+        if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
+            || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)
+            || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_CRON=scheduler')) {
+            throw new \RuntimeException('Refusing to destroy an unowned EasyPanel scheduler service.');
+        }
+        $client->destroyBoxService($projectName, 'scheduler');
+    }
+
+    private function destroyDatabases(EasyPanelClient $client, object $project, string $projectName): void
+    {
+        if (! method_exists($project, 'databases')) {
+            return;
+        }
+
+        $inventory = $client->listProjectsAndServices();
+        foreach ($project->databases() as $database) {
+            if (! method_exists($database, 'name')) {
+                continue;
+            }
+            $type = $this->databaseType($database);
+            $serviceName = $this->databaseServiceName($database->name());
+            if ($this->findService($inventory, $projectName, $serviceName) === null) {
+                continue;
+            }
+            $inspected = $client->inspectDatabaseService($type, $projectName, $serviceName);
+            $env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
+            if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
+                || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
+                throw new \RuntimeException("Refusing to destroy unowned EasyPanel database service {$serviceName}.");
+            }
+            $client->destroyDatabaseService($type, $projectName, $serviceName);
+        }
+    }
+
+    private function databaseServiceName(string $name): string
+    {
+        return 'db-'.$this->slug($name);
+    }
+
+    private function databaseType(object $database): string
+    {
+        $type = method_exists($database, 'type') ? strtolower(trim((string) $database->type())) : 'mysql';
+
+        return match ($type) {
+            'postgresql' => 'postgres',
+            'mongodb' => 'mongo',
+            default => $type,
+        };
+    }
+
+    private function slug(string $value): string
+    {
+        $slug = (string) preg_replace('/[^a-z0-9]+/', '-', strtolower($value));
+        $slug = trim($slug, '-');
+
+        return $slug !== '' ? substr($slug, 0, 48) : 'database';
+    }
+
+    /** @return array<int, string> */
+    public function logs(object $project, object $profile, int $lines = 100): array
+    {
+        $records = $this->getClient()->queryServiceLogs(
+            $this->managedProjectName($project, $profile),
+            $this->serviceName(),
+            ['limit' => min(1000, max(1, $lines))],
+        );
+
+        return array_values(array_map(
+            static function (array $record): string {
+                foreach (['message', 'line', 'text'] as $field) {
+                    if (is_string($record[$field] ?? null)) {
+                        return $record[$field];
+                    }
+                }
+
+                return (string) (json_encode($record, JSON_UNESCAPED_SLASHES) ?: '{}');
+            },
+            $records,
+        ));
+    }
+
+    /** @return array<string, mixed> */
+    public function status(object $project, object $profile): array
+    {
+        $projectName = $this->managedProjectName($project, $profile);
+        $serviceName = $this->serviceName();
+        $service = $this->findService(
+            $this->getClient()->listProjectsAndServices(),
+            $projectName,
+            $serviceName,
+        );
+
+        if ($service === null) {
+            return [
+                'provider' => $this->getName(),
+                'state' => 'not_found',
+                'project' => $projectName,
+                'service' => $serviceName,
+            ];
+        }
+
+        $inspection = $this->getClient()->inspectAppService($projectName, $serviceName);
+        $serviceState = $inspection['status'] ?? $inspection['state'] ?? null;
+
+        return [
+            'provider' => $this->getName(),
+            'state' => is_string($serviceState) && $serviceState !== '' ? $serviceState : 'deployed',
+            'project' => $projectName,
+            'service' => $serviceName,
+            'service_state' => $inspection,
+        ];
     }
 
     protected function getClient(): EasyPanelClient
@@ -372,7 +702,8 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
         };
     }
 
-    private function environment(string $projectName, object $profile): string
+    /** @param array<string, string> $additional */
+    private function environment(string $projectName, object $profile, array $additional = []): string
     {
         $lines = [];
         foreach ([$this->config['env'] ?? null, $this->profileValue($profile, 'env'), $this->profileValue($profile, 'environment')] as $value) {
@@ -385,6 +716,10 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
                     }
                 }
             }
+        }
+
+        foreach ($additional as $key => $value) {
+            $lines[] = $key.'='.$value;
         }
 
         $lines[] = self::MANAGED_MARKER;
@@ -518,6 +853,33 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
         $slug = \trim($slug, '-');
 
         return $slug !== '' ? $slug : 'unnamed';
+    }
+
+    private function databaseIdentifier(string $value): string
+    {
+        $identifier = strtolower((string) preg_replace('/[^a-z0-9_]+/', '_', $value));
+        $identifier = trim($identifier, '_');
+        if ($identifier === '' || ! preg_match('/^[a-z]/', $identifier)) {
+            $identifier = 'db_'.$identifier;
+        }
+
+        return substr($identifier, 0, 63);
+    }
+
+    /** @param array<string, mixed> $source */
+    private function privateRepository(array $source): bool
+    {
+        return ($source['private'] ?? $this->config['private_repository'] ?? false) === true;
+    }
+
+    private function cronWebhookToken(string $projectName, string $name): string
+    {
+        $configured = $this->stringConfig('cron_webhook_token');
+        if ($configured !== '') {
+            return $configured;
+        }
+
+        return hash_hmac('sha256', $projectName.'/'.$name, $this->authToken());
     }
 
     private function stringConfig(string $key, string $default = ''): string

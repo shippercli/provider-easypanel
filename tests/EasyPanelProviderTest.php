@@ -6,6 +6,8 @@ namespace ShipperCli\ProviderEasyPanel\Tests;
 
 use PHPUnit\Framework\TestCase;
 use ShipperCli\Contracts\CapabilityManifest;
+use ShipperCli\Contracts\DeploymentLogsProviderInterface;
+use ShipperCli\Contracts\DeploymentStatusProviderInterface;
 use ShipperCli\ProviderEasyPanel\EasyPanelClient;
 use ShipperCli\ProviderEasyPanel\EasyPanelPlugin;
 use ShipperCli\ProviderEasyPanel\EasyPanelProvider;
@@ -22,6 +24,96 @@ final class EasyPanelProviderTest extends TestCase
         $capabilities = (new EasyPanelProvider())->capabilities();
 
         self::assertSame($capabilities, CapabilityManifest::from($capabilities)->toArray());
+    }
+
+    public function test_provider_exposes_the_core_logs_and_status_contracts(): void
+    {
+        $provider = new EasyPanelProvider();
+
+        self::assertInstanceOf(DeploymentLogsProviderInterface::class, $provider);
+        self::assertInstanceOf(DeploymentStatusProviderInterface::class, $provider);
+    }
+
+    public function test_logs_query_uses_the_derived_managed_service(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+                $calls[] = [$procedure, $input];
+                return ['logs' => [
+                    ['message' => 'ready', 'stream' => 'stdout'],
+                    ['text' => 'started'],
+                    ['timestamp' => '2026-09-27T10:00:00Z', 'stream' => 'stdout'],
+                ]];
+            },
+        );
+        $provider = new EasyPanelProvider($this->config(), $client);
+
+        self::assertSame(
+            ['ready', 'started', '{"timestamp":"2026-09-27T10:00:00Z","stream":"stdout"}'],
+            $provider->logs($this->project(), $this->profile(), 25),
+        );
+        self::assertSame('logs.queryServiceLogs', $calls[0][0]);
+        self::assertSame('shippercli-demo-provider-v1', $calls[0][1]['projectName']);
+        self::assertSame('web', $calls[0][1]['serviceName']);
+        self::assertSame(25, $calls[0][1]['limit']);
+    }
+
+    public function test_logs_limit_is_clamped_to_the_api_maximum(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient('https://panel.example.com', 'token', transport: static function (string $procedure, array $input) use (&$calls): array {
+            $calls[] = [$procedure, $input];
+            return ['logs' => []];
+        });
+
+        (new EasyPanelProvider($this->config(), $client))->logs($this->project(), $this->profile(), 5000);
+
+        self::assertSame(1000, $calls[0][1]['limit']);
+    }
+
+    public function test_status_inspects_the_derived_managed_service(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+                $calls[] = [$procedure, $input];
+
+                return match ($procedure) {
+                    'projects.listProjectsAndServices' => [
+                        'projects' => [['name' => 'shippercli-demo-provider-v1']],
+                        'services' => [[
+                            'projectName' => 'shippercli-demo-provider-v1',
+                            'name' => 'web',
+                            'type' => 'app',
+                        ]],
+                    ],
+                    'services.app.inspectService' => [
+                        'status' => 'running',
+                        'image' => 'example/app:latest',
+                    ],
+                    default => [],
+                };
+            },
+        );
+        $provider = new EasyPanelProvider($this->config(), $client);
+
+        self::assertSame([
+            'provider' => 'easypanel',
+            'state' => 'running',
+            'project' => 'shippercli-demo-provider-v1',
+            'service' => 'web',
+            'service_state' => [
+                'status' => 'running',
+                'image' => 'example/app:latest',
+            ],
+        ], $provider->status($this->project(), $this->profile()));
+        self::assertSame('projects.listProjectsAndServices', $calls[0][0]);
+        self::assertSame('services.app.inspectService', $calls[1][0]);
     }
 
     public function test_apply_creates_and_deploys_only_the_derived_managed_resources(): void
@@ -58,6 +150,120 @@ final class EasyPanelProviderTest extends TestCase
         self::assertStringContainsString('SHIPPERCLI_MANAGED=1', $calls[4][1]['env']);
         self::assertStringContainsString('SHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1', $calls[4][1]['env']);
         self::assertSame('demo.shippercli.com', $calls[6][1]['host']);
+    }
+
+    public function test_apply_provisions_a_configured_database_service(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+                $calls[] = [$procedure, $input];
+
+                return match ($procedure) {
+                    'projects.listProjectsAndServices' => ['projects' => [], 'services' => []],
+                    'domains.listDomains' => [],
+                    default => null,
+                };
+            },
+        );
+        $project = new class {
+            public function name(): string { return 'provider'; }
+            public function repository(): array { return []; }
+            public function databases(): array { return [new class {
+                public function name(): string { return 'main'; }
+                public function user(): string { return 'app'; }
+                public function type(): string { return 'postgresql'; }
+            }]; }
+        };
+        $provider = new EasyPanelProvider($this->config(), $client);
+
+        self::assertTrue($provider->apply($project, $this->profile()));
+        $databaseCall = $calls[array_search('services.postgres.createService', array_column($calls, 0), true)];
+        self::assertSame('db-main', $databaseCall[1]['serviceName']);
+        self::assertSame('app', $databaseCall[1]['user']);
+        self::assertSame('main', $databaseCall[1]['databaseName']);
+        self::assertStringContainsString('SHIPPERCLI_MANAGED=1', $databaseCall[1]['env']);
+        $environmentCalls = array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'services.app.updateEnv'));
+        self::assertStringContainsString('DB_PASSWORD=', $environmentCalls[0][1]['env']);
+    }
+
+    public function test_apply_reuses_an_existing_database_with_an_alias_type(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+                $calls[] = [$procedure, $input];
+
+                return match ($procedure) {
+                    'projects.listProjectsAndServices' => [
+                        'projects' => [['name' => 'shippercli-demo-provider-v1']],
+                        'services' => [
+                            ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'web', 'type' => 'app'],
+                            ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'db-main', 'type' => 'postgres'],
+                        ],
+                    ],
+                    'domains.listDomains' => [],
+                    default => null,
+                };
+            },
+        );
+        $project = new class {
+            public function name(): string { return 'provider'; }
+            public function repository(): array { return []; }
+            public function databases(): array { return [new class {
+                public function name(): string { return 'main'; }
+                public function type(): string { return 'postgresql'; }
+            }]; }
+        };
+
+        self::assertTrue((new EasyPanelProvider($this->config(), $client))->apply($project, $this->profile()));
+        self::assertNotContains('services.postgres.createService', array_column($calls, 0));
+    }
+
+    public function test_apply_translates_named_cron_frequency_to_an_easy_panel_expression(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+                $calls[] = [$procedure, $input];
+
+                return match ($procedure) {
+                    'projects.listProjectsAndServices' => ['projects' => [], 'services' => []],
+                    'domains.listDomains' => [],
+                    default => null,
+                };
+            },
+        );
+        $project = new class {
+            public function name(): string { return 'provider'; }
+            public function repository(): array { return []; }
+            public function cron(): array { return ['nightly' => new class {
+                public function command(): string { return 'php artisan schedule:run'; }
+                public function frequency(): string { return 'daily'; }
+                public function enabled(): bool { return true; }
+            }]; }
+        };
+        $config = [
+            ...$this->config(),
+            'source' => ['type' => 'git', 'repo' => 'https://github.com/example/app.git'],
+        ];
+
+        self::assertTrue((new EasyPanelProvider($config, $client))->apply($project, $this->profile()));
+
+        $scriptCall = array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'services.box.updateScripts'));
+        self::assertCount(1, $scriptCall);
+        self::assertSame('0 0 * * *', $scriptCall[0][1]['scripts'][0]['schedule']);
+        self::assertSame('php artisan schedule:run', $scriptCall[0][1]['scripts'][0]['content']);
+        self::assertNotEmpty($scriptCall[0][1]['scripts'][0]['webhookToken']);
+        $cloneCalls = array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'services.box.cloneGitRepository'));
+        self::assertCount(1, $cloneCalls);
+        self::assertFalse($cloneCalls[0][1]['private']);
     }
 
     public function test_destroy_refuses_a_service_without_ownership_markers(): void
