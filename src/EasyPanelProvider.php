@@ -238,12 +238,11 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
     /** @return array<string, string> */
     private function applyDatabases(EasyPanelClient $client, object $project, string $projectName): array
     {
-        if (! method_exists($project, 'databases')) {
-            return [];
-        }
-
         $environment = [];
-        foreach ($project->databases() as $database) {
+        $databases = $this->sectionDeclared($project, 'databases', 'databases') && method_exists($project, 'databases')
+            ? $project->databases()
+            : [];
+        foreach ($databases as $database) {
             if (! method_exists($database, 'name')) {
                 continue;
             }
@@ -280,6 +279,10 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             }
         }
 
+        if ($this->booleanConfig('reconcile_databases', false)) {
+            $this->reconcileDatabases($client, $project, $projectName);
+        }
+
         return $environment;
     }
 
@@ -287,11 +290,19 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
     /** @param array<string, string> $databaseEnvironment */
     private function applyWorkers(EasyPanelClient $client, object $project, object $profile, string $projectName, array $source, array $databaseEnvironment = []): void
     {
-        if (! method_exists($project, 'queues')) {
-            return;
+        $queues = $this->sectionDeclared($project, 'queues', 'queues') && method_exists($project, 'queues')
+            ? $project->queues()
+            : [];
+        $inventory = $client->listProjectsAndServices();
+        $desired = [];
+        foreach ($queues as $name => $queue) {
+            if (! method_exists($queue, 'enabled') || $queue->enabled()) {
+                $desired['worker-'.$this->slug((string) $name)] = true;
+            }
         }
+        $this->reconcileWorkers($client, $inventory, $projectName, $desired);
 
-        foreach ($project->queues() as $name => $queue) {
+        foreach ($queues as $name => $queue) {
             if (method_exists($queue, 'enabled') && ! $queue->enabled()) {
                 continue;
             }
@@ -326,38 +337,28 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
 
     private function destroyWorkers(EasyPanelClient $client, object $project, string $projectName): void
     {
-        if (! method_exists($project, 'queues')) {
-            return;
-        }
-
         $inventory = $client->listProjectsAndServices();
-        foreach ($project->queues() as $name => $queue) {
-            $workerName = 'worker-'.$this->slug((string) $name);
-            if ($this->findService($inventory, $projectName, $workerName) === null) {
-                continue;
-            }
-            $inspected = $client->inspectAppService($projectName, $workerName);
-            $env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
-            if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
-                || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)
-                || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_WORKER='.$workerName)) {
-                throw new \RuntimeException("Refusing to destroy unowned EasyPanel worker service {$workerName}.");
-            }
-            $client->destroyAppService($projectName, $workerName);
-        }
+        $this->reconcileWorkers($client, $inventory, $projectName, []);
     }
 
     /** @param array<string, mixed> $source */
     /** @param array<string, string> $databaseEnvironment */
     private function applyCron(EasyPanelClient $client, object $project, object $profile, string $projectName, array $source, array $databaseEnvironment = []): void
     {
-        if (! method_exists($project, 'cron') || $project->cron() === []) {
-            return;
-        }
+        $crons = $this->sectionDeclared($project, 'cron', 'cron') && method_exists($project, 'cron')
+            ? $project->cron()
+            : [];
 
         $serviceName = 'scheduler';
         $inventory = $client->listProjectsAndServices();
         $service = $this->findService($inventory, $projectName, $serviceName);
+        if ($crons === []) {
+            if ($service !== null) {
+                $this->destroyOwnedCronService($client, $projectName, $service);
+            }
+
+            return;
+        }
         if ($service !== null && ($service['type'] ?? null) !== 'box') {
             throw new \RuntimeException('EasyPanel scheduler service name is already used by a non-Box service.');
         }
@@ -380,7 +381,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         );
 
         $scripts = [];
-        foreach ($project->cron() as $name => $cron) {
+        foreach ($crons as $name => $cron) {
             if (method_exists($cron, 'enabled') && ! $cron->enabled()) {
                 continue;
             }
@@ -429,12 +430,44 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
 
     private function destroyCron(EasyPanelClient $client, object $project, string $projectName): void
     {
-        if (! method_exists($project, 'cron') || $project->cron() === []) {
+        $inventory = $client->listProjectsAndServices();
+        $service = $this->findService($inventory, $projectName, 'scheduler');
+        if ($service === null) {
             return;
         }
+        $this->destroyOwnedCronService($client, $projectName, $service);
+    }
+
+    private function destroyDatabases(EasyPanelClient $client, object $project, string $projectName): void
+    {
         $inventory = $client->listProjectsAndServices();
-        if ($this->findService($inventory, $projectName, 'scheduler') === null) {
-            return;
+        $this->reconcileDatabases($client, $project, $projectName, $inventory);
+    }
+
+    /** @param array{projects: array<int, array<string, mixed>>, services: array<int, array<string, mixed>>} $inventory @param array<string, bool> $desired */
+    private function reconcileWorkers(EasyPanelClient $client, array $inventory, string $projectName, array $desired): void
+    {
+        foreach ($inventory['services'] as $service) {
+            $workerName = (string) ($service['name'] ?? '');
+            if (($service['projectName'] ?? null) !== $projectName || ($service['type'] ?? null) !== 'app'
+                || ! str_starts_with($workerName, 'worker-') || isset($desired[$workerName])) {
+                continue;
+            }
+            $inspected = $client->inspectAppService($projectName, $workerName);
+            $env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
+            if ($this->hasEnvironmentLine($env, self::MANAGED_MARKER)
+                && $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)
+                && $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_WORKER='.$workerName)) {
+                $client->destroyAppService($projectName, $workerName);
+            }
+        }
+    }
+
+    /** @param array<string, mixed> $service */
+    private function destroyOwnedCronService(EasyPanelClient $client, string $projectName, array $service): void
+    {
+        if (($service['type'] ?? null) !== 'box') {
+            throw new \RuntimeException('Refusing to destroy a non-Box EasyPanel scheduler service.');
         }
         $inspected = $client->inspectBoxService($projectName, 'scheduler');
         $env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
@@ -446,30 +479,46 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         $client->destroyBoxService($projectName, 'scheduler');
     }
 
-    private function destroyDatabases(EasyPanelClient $client, object $project, string $projectName): void
+    /** @param array{projects: array<int, array<string, mixed>>, services: array<int, array<string, mixed>>} $inventory */
+    private function reconcileDatabases(EasyPanelClient $client, object $project, string $projectName, ?array $inventory = null): void
     {
-        if (! method_exists($project, 'databases')) {
-            return;
-        }
-
-        $inventory = $client->listProjectsAndServices();
-        foreach ($project->databases() as $database) {
-            if (! method_exists($database, 'name')) {
-                continue;
+        $inventory ??= $client->listProjectsAndServices();
+        $desired = [];
+        if ($this->sectionDeclared($project, 'databases', 'databases') && method_exists($project, 'databases')) {
+            foreach ($project->databases() as $database) {
+                if (method_exists($database, 'name')) {
+                    $desired[$this->databaseServiceName($database->name())] = true;
+                }
             }
-            $type = $this->databaseType($database);
-            $serviceName = $this->databaseServiceName($database->name());
-            if ($this->findService($inventory, $projectName, $serviceName) === null) {
+        }
+        foreach ($inventory['services'] as $service) {
+            $serviceName = (string) ($service['name'] ?? '');
+            $type = (string) ($service['type'] ?? '');
+            if (($service['projectName'] ?? null) !== $projectName || ! $this->isDatabaseType($type)
+                || ! str_starts_with($serviceName, 'db-') || isset($desired[$serviceName])) {
                 continue;
             }
             $inspected = $client->inspectDatabaseService($type, $projectName, $serviceName);
             $env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
-            if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
-                || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
-                throw new \RuntimeException("Refusing to destroy unowned EasyPanel database service {$serviceName}.");
+            if ($this->hasEnvironmentLine($env, self::MANAGED_MARKER)
+                && $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
+                $client->destroyDatabaseService($type, $projectName, $serviceName);
             }
-            $client->destroyDatabaseService($type, $projectName, $serviceName);
         }
+    }
+
+    private function isDatabaseType(string $type): bool
+    {
+        return in_array($type, ['mysql', 'mariadb', 'postgres', 'mongo', 'redis'], true);
+    }
+
+    private function sectionDeclared(object $project, string $section, string $method): bool
+    {
+        if (method_exists($project, 'hasSection')) {
+            return $project->hasSection($section);
+        }
+
+        return method_exists($project, $method);
     }
 
     private function databaseServiceName(string $name): string

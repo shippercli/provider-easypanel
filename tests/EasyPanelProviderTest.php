@@ -141,6 +141,8 @@ final class EasyPanelProviderTest extends TestCase
             'services.app.createService',
             'services.app.updateSourceImage',
             'services.app.updateEnv',
+            'projects.listProjectsAndServices',
+            'projects.listProjectsAndServices',
             'domains.listDomains',
             'domains.createDomain',
             'services.app.deployService',
@@ -149,7 +151,68 @@ final class EasyPanelProviderTest extends TestCase
         self::assertSame('shippercli-demo-provider-v1', $calls[2][1]['projectName']);
         self::assertStringContainsString('SHIPPERCLI_MANAGED=1', $calls[4][1]['env']);
         self::assertStringContainsString('SHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1', $calls[4][1]['env']);
-        self::assertSame('demo.shippercli.com', $calls[6][1]['host']);
+        self::assertSame('demo.shippercli.com', $calls[8][1]['host']);
+    }
+
+    public function test_apply_removes_an_owned_worker_removed_from_configuration(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient('https://panel.example.com', 'token', transport: static function (string $procedure, array $input) use (&$calls): mixed {
+            $calls[] = [$procedure, $input];
+
+            return match ($procedure) {
+                'projects.listProjectsAndServices' => [
+                    'projects' => [['name' => 'shippercli-demo-provider-v1']],
+                    'services' => [
+                        ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'web', 'type' => 'app'],
+                        ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'worker-old', 'type' => 'app'],
+                    ],
+                ],
+                'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1\nSHIPPERCLI_MANAGED_WORKER=worker-old"],
+                'domains.listDomains' => [],
+                default => null,
+            };
+        });
+        $project = new class {
+            public function name(): string { return 'provider'; }
+            public function repository(): array { return []; }
+            public function hasSection(string $section): bool { return $section === 'queues'; }
+            public function queues(): array { return []; }
+        };
+
+        self::assertTrue((new EasyPanelProvider($this->config(), $client))->apply($project, $this->profile()));
+        self::assertContains('services.app.destroyService', \array_column($calls, 0));
+    }
+
+    public function test_apply_can_reconcile_an_owned_database_when_explicitly_enabled(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient('https://panel.example.com', 'token', transport: static function (string $procedure, array $input) use (&$calls): mixed {
+            $calls[] = [$procedure, $input];
+
+            return match ($procedure) {
+                'projects.listProjectsAndServices' => [
+                    'projects' => [['name' => 'shippercli-demo-provider-v1']],
+                    'services' => [
+                        ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'web', 'type' => 'app'],
+                        ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'db-old', 'type' => 'postgres'],
+                    ],
+                ],
+                'services.postgres.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1"],
+                'domains.listDomains' => [],
+                default => null,
+            };
+        });
+        $project = new class {
+            public function name(): string { return 'provider'; }
+            public function repository(): array { return []; }
+            public function hasSection(string $section): bool { return $section === 'databases'; }
+            public function databases(): array { return []; }
+        };
+        $provider = new EasyPanelProvider([...$this->config(), 'reconcile_databases' => true], $client);
+
+        self::assertTrue($provider->apply($project, $this->profile()));
+        self::assertContains('services.postgres.destroyService', \array_column($calls, 0));
     }
 
     public function test_apply_provisions_a_configured_database_service(): void
