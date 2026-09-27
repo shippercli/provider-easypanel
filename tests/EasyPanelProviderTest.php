@@ -6,6 +6,8 @@ namespace ShipperCli\ProviderEasyPanel\Tests;
 
 use PHPUnit\Framework\TestCase;
 use ShipperCli\Contracts\CapabilityManifest;
+use ShipperCli\Contracts\DeploymentLogsProviderInterface;
+use ShipperCli\Contracts\DeploymentStatusProviderInterface;
 use ShipperCli\ProviderEasyPanel\EasyPanelClient;
 use ShipperCli\ProviderEasyPanel\EasyPanelPlugin;
 use ShipperCli\ProviderEasyPanel\EasyPanelProvider;
@@ -24,6 +26,14 @@ final class EasyPanelProviderTest extends TestCase
         self::assertSame($capabilities, CapabilityManifest::from($capabilities)->toArray());
     }
 
+    public function test_provider_exposes_the_core_logs_and_status_contracts(): void
+    {
+        $provider = new EasyPanelProvider();
+
+        self::assertInstanceOf(DeploymentLogsProviderInterface::class, $provider);
+        self::assertInstanceOf(DeploymentStatusProviderInterface::class, $provider);
+    }
+
     public function test_logs_query_uses_the_derived_managed_service(): void
     {
         $calls = [];
@@ -32,19 +42,65 @@ final class EasyPanelProviderTest extends TestCase
             'token',
             transport: static function (string $procedure, array $input) use (&$calls): mixed {
                 $calls[] = [$procedure, $input];
-                return ['logs' => [['message' => 'ready', 'stream' => 'stdout']]];
+                return ['logs' => [
+                    ['message' => 'ready', 'stream' => 'stdout'],
+                    ['text' => 'started'],
+                    ['timestamp' => '2026-09-27T10:00:00Z', 'stream' => 'stdout'],
+                ]];
             },
         );
         $provider = new EasyPanelProvider($this->config(), $client);
 
         self::assertSame(
-            [['message' => 'ready', 'stream' => 'stdout']],
-            $provider->logs($this->project(), $this->profile(), ['limit' => 25]),
+            ['ready', 'started', '{"timestamp":"2026-09-27T10:00:00Z","stream":"stdout"}'],
+            $provider->logs($this->project(), $this->profile(), 25),
         );
         self::assertSame('logs.queryServiceLogs', $calls[0][0]);
         self::assertSame('shippercli-demo-provider-v1', $calls[0][1]['projectName']);
         self::assertSame('web', $calls[0][1]['serviceName']);
         self::assertSame(25, $calls[0][1]['limit']);
+    }
+
+    public function test_status_inspects_the_derived_managed_service(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+                $calls[] = [$procedure, $input];
+
+                return match ($procedure) {
+                    'projects.listProjectsAndServices' => [
+                        'projects' => [['name' => 'shippercli-demo-provider-v1']],
+                        'services' => [[
+                            'projectName' => 'shippercli-demo-provider-v1',
+                            'name' => 'web',
+                            'type' => 'app',
+                        ]],
+                    ],
+                    'services.app.inspectService' => [
+                        'status' => 'running',
+                        'image' => 'example/app:latest',
+                    ],
+                    default => [],
+                };
+            },
+        );
+        $provider = new EasyPanelProvider($this->config(), $client);
+
+        self::assertSame([
+            'provider' => 'easypanel',
+            'state' => 'running',
+            'project' => 'shippercli-demo-provider-v1',
+            'service' => 'web',
+            'service_state' => [
+                'status' => 'running',
+                'image' => 'example/app:latest',
+            ],
+        ], $provider->status($this->project(), $this->profile()));
+        self::assertSame('projects.listProjectsAndServices', $calls[0][0]);
+        self::assertSame('services.app.inspectService', $calls[1][0]);
     }
 
     public function test_apply_creates_and_deploys_only_the_derived_managed_resources(): void

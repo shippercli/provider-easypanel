@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace ShipperCli\ProviderEasyPanel;
 
 use ShipperCli\Contracts\DeploymentProviderInterface;
+use ShipperCli\Contracts\DeploymentLogsProviderInterface;
+use ShipperCli\Contracts\DeploymentStatusProviderInterface;
 use ShipperCli\Contracts\ProviderCapabilitiesInterface;
 
-final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCapabilitiesInterface
+final class EasyPanelProvider implements DeploymentLogsProviderInterface, DeploymentProviderInterface, DeploymentStatusProviderInterface, ProviderCapabilitiesInterface
 {
     private const MANAGED_MARKER = 'SHIPPERCLI_MANAGED=1';
 
@@ -440,14 +442,59 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
         return $slug !== '' ? substr($slug, 0, 48) : 'database';
     }
 
-    /** @param array<string, mixed> $filters @return array<int, array<string, mixed>> */
-    public function logs(object $project, object $profile, array $filters = []): array
+    /** @return array<int, string> */
+    public function logs(object $project, object $profile, int $lines = 100): array
     {
-        return $this->getClient()->queryServiceLogs(
+        $records = $this->getClient()->queryServiceLogs(
             $this->managedProjectName($project, $profile),
             $this->serviceName(),
-            $filters,
+            ['limit' => max(1, $lines)],
         );
+
+        return array_values(array_map(
+            static function (array $record): string {
+                foreach (['message', 'line', 'text'] as $field) {
+                    if (is_string($record[$field] ?? null)) {
+                        return $record[$field];
+                    }
+                }
+
+                return (string) (json_encode($record, JSON_UNESCAPED_SLASHES) ?: '{}');
+            },
+            $records,
+        ));
+    }
+
+    /** @return array<string, mixed> */
+    public function status(object $project, object $profile): array
+    {
+        $projectName = $this->managedProjectName($project, $profile);
+        $serviceName = $this->serviceName();
+        $service = $this->findService(
+            $this->getClient()->listProjectsAndServices(),
+            $projectName,
+            $serviceName,
+        );
+
+        if ($service === null) {
+            return [
+                'provider' => $this->getName(),
+                'state' => 'not_found',
+                'project' => $projectName,
+                'service' => $serviceName,
+            ];
+        }
+
+        $inspection = $this->getClient()->inspectAppService($projectName, $serviceName);
+        $serviceState = $inspection['status'] ?? $inspection['state'] ?? null;
+
+        return [
+            'provider' => $this->getName(),
+            'state' => is_string($serviceState) && $serviceState !== '' ? $serviceState : 'deployed',
+            'project' => $projectName,
+            'service' => $serviceName,
+            'service_state' => $inspection,
+        ];
     }
 
     protected function getClient(): EasyPanelClient
