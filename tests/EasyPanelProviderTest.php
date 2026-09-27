@@ -21,6 +21,7 @@ final class EasyPanelProviderTest extends TestCase
     {
         $capabilities = (new EasyPanelProvider())->capabilities();
 
+        self::assertSame('supported', $capabilities['previews']['state']);
         self::assertSame($capabilities, CapabilityManifest::from($capabilities)->toArray());
     }
 

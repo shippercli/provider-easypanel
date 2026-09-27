@@ -42,7 +42,7 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
             'background_workloads' => ['state' => 'supported', 'limitations' => ['Queue workers and daemons are provisioned as managed app services; cron jobs use a managed Box scheduler.']],
             'observability' => ['state' => 'partial', 'limitations' => ['Service logs require EasyPanel log aggregation to be enabled.']],
             'rollback' => ['state' => 'unsupported'],
-            'previews' => ['state' => 'partial', 'limitations' => ['Profile-specific domains can be deployed, but automated preview cleanup is not implemented.']],
+            'previews' => ['state' => 'supported', 'limitations' => ['Preview cleanup requires an explicit destroy operation; ownership-guarded cleanup is implemented.']],
             'server_lifecycle' => ['state' => 'unsupported'],
         ];
     }

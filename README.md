@@ -19,6 +19,7 @@ Supported:
 - App deployment
 - Service log queries (when EasyPanel log aggregation is enabled)
 - App resource limits and owned service mounts
+- Profile-specific preview deployments with ownership-guarded cleanup
 - Ownership-guarded service and empty-project cleanup
 
 Not yet supported by the provider:
