@@ -305,10 +305,10 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
             $client->updateAppResources($projectName, $serviceName, $resources);
         }
 
-        $mounts = $this->config['mounts'] ?? [];
-        if (! is_array($mounts)) {
+        if (! array_key_exists('mounts', $this->config) || ! is_array($this->config['mounts'])) {
             return;
         }
+        $mounts = $this->config['mounts'];
 
         $inspected = $client->inspectAppService($projectName, $serviceName);
         $env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
