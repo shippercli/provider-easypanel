@@ -279,6 +279,46 @@ final class EasyPanelClient
         ]);
     }
 
+    /** @param array<string, mixed> $resources */
+    public function updateAppResources(string $projectName, string $serviceName, array $resources): void
+    {
+        $this->call('services.app.updateResources', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+            'resources' => $resources,
+        ]);
+    }
+
+    /** @param array<string, mixed> $values */
+    public function createMount(string $projectName, string $serviceName, array $values): void
+    {
+        $this->call('mounts.createMount', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+            'values' => $values,
+        ]);
+    }
+
+    /** @param array<string, mixed> $values */
+    public function updateMount(string $projectName, string $serviceName, int $index, array $values): void
+    {
+        $this->call('mounts.updateMount', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+            'index' => $index,
+            'values' => $values,
+        ]);
+    }
+
+    public function deleteMount(string $projectName, string $serviceName, int $index): void
+    {
+        $this->call('mounts.deleteMount', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+            'index' => $index,
+        ]);
+    }
+
     /** @param array<string, mixed> $filters @return array<int, array<string, mixed>> */
     public function queryServiceLogs(string $projectName, string $serviceName, array $filters = []): array
     {

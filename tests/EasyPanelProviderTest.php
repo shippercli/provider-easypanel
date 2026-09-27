@@ -117,6 +117,79 @@ final class EasyPanelProviderTest extends TestCase
         self::assertStringContainsString('SHIPPERCLI_MANAGED=1', $databaseCall[1]['env']);
     }
 
+    public function test_apply_reconciles_configured_resources_and_mounts(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+                $calls[] = [$procedure, $input];
+
+                return match ($procedure) {
+                    'projects.listProjectsAndServices' => ['projects' => [], 'services' => []],
+                    'domains.listDomains' => [],
+                    'services.app.inspectService' => [
+                        'env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1",
+                        'mounts' => [],
+                    ],
+                    default => null,
+                };
+            },
+        );
+        $config = [
+            ...$this->config(),
+            'resources' => ['cpu' => 1, 'memory' => 512],
+            'mounts' => [['hostPath' => '/data', 'mountPath' => '/app/data', 'type' => 'bind']],
+        ];
+        $provider = new EasyPanelProvider($config, $client);
+
+        self::assertTrue($provider->apply($this->project(), $this->profile()));
+        self::assertContains('services.app.updateResources', array_column($calls, 0));
+        self::assertContains('mounts.createMount', array_column($calls, 0));
+        $resourceCall = $calls[array_search('services.app.updateResources', array_column($calls, 0), true)];
+        self::assertSame(512, $resourceCall[1]['resources']['memory']);
+    }
+
+    public function test_apply_updates_mounts_by_path_and_removes_stale_mounts(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+                $calls[] = [$procedure, $input];
+
+                return match ($procedure) {
+                    'projects.listProjectsAndServices' => ['projects' => [], 'services' => []],
+                    'domains.listDomains' => [],
+                    'services.app.inspectService' => [
+                        'env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1",
+                        'mounts' => [
+                            ['hostPath' => '/old', 'mountPath' => '/app/old', 'type' => 'bind'],
+                            ['hostPath' => '/data', 'mountPath' => '/app/data', 'type' => 'bind'],
+                        ],
+                    ],
+                    default => null,
+                };
+            },
+        );
+        $config = [
+            ...$this->config(),
+            'mounts' => [['hostPath' => '/updated', 'mountPath' => '/app/data', 'type' => 'bind']],
+        ];
+
+        self::assertTrue((new EasyPanelProvider($config, $client))->apply($this->project(), $this->profile()));
+
+        $update = array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'mounts.updateMount'));
+        $delete = array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'mounts.deleteMount'));
+        self::assertCount(1, $update);
+        self::assertSame(1, $update[0][1]['index']);
+        self::assertSame('/updated', $update[0][1]['values']['hostPath']);
+        self::assertCount(1, $delete);
+        self::assertSame(0, $delete[0][1]['index']);
+    }
+
     public function test_apply_provisions_and_configures_a_daemon_app_service(): void
     {
         $calls = [];
