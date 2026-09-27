@@ -117,6 +117,42 @@ final class EasyPanelProviderTest extends TestCase
         self::assertStringContainsString('SHIPPERCLI_MANAGED=1', $databaseCall[1]['env']);
     }
 
+    public function test_apply_provisions_and_configures_a_daemon_app_service(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+                $calls[] = [$procedure, $input];
+
+                return match ($procedure) {
+                    'projects.listProjectsAndServices' => ['projects' => [], 'services' => []],
+                    'domains.listDomains' => [],
+                    default => null,
+                };
+            },
+        );
+        $project = new class {
+            public function name(): string { return 'provider'; }
+            public function repository(): array { return []; }
+            public function daemons(): array { return ['horizon' => new class {
+                public function command(): string { return 'php artisan horizon'; }
+                public function directory(): string { return '/var/www/app'; }
+            }]; }
+        };
+        $provider = new EasyPanelProvider($this->config(), $client);
+
+        self::assertTrue($provider->apply($project, $this->profile()));
+        $deploymentCalls = array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'services.app.updateDeploy'));
+        self::assertCount(1, $deploymentCalls);
+        self::assertSame('daemon-horizon', $deploymentCalls[0][1]['serviceName']);
+        self::assertSame("cd '/var/www/app' && php artisan horizon", $deploymentCalls[0][1]['deploy']['command']);
+        $daemonEnvironment = array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'services.app.updateEnv' && $call[1]['serviceName'] === 'daemon-horizon'));
+        self::assertCount(1, $daemonEnvironment);
+        self::assertStringContainsString('SHIPPERCLI_MANAGED_DAEMON=daemon-horizon', $daemonEnvironment[0][1]['env']);
+    }
+
     public function test_destroy_refuses_a_service_without_ownership_markers(): void
     {
         $calls = [];

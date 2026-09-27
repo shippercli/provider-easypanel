@@ -14,6 +14,7 @@ Supported:
 - Custom domains with EasyPanel-managed HTTPS
 - MySQL, MariaDB, PostgreSQL, MongoDB, and Redis service lifecycle
 - Queue workers as separately managed app services
+- Daemons as separately managed app services
 - Cron jobs as scheduled scripts in a managed Box service when the source is Git-backed
 - App deployment
 - Service log queries (when EasyPanel log aggregation is enabled)

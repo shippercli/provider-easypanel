@@ -39,7 +39,7 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
             'env' => ['state' => 'supported'],
             'databases' => ['state' => 'supported'],
             'profiles' => ['state' => 'supported'],
-            'background_workloads' => ['state' => 'partial', 'limitations' => ['Queue workers are provisioned as managed app services; other workload types are not modeled.']],
+            'background_workloads' => ['state' => 'supported', 'limitations' => ['Queue workers and daemons are provisioned as managed app services; cron jobs use a managed Box scheduler.']],
             'observability' => ['state' => 'partial', 'limitations' => ['Service logs require EasyPanel log aggregation to be enabled.']],
             'rollback' => ['state' => 'unsupported'],
             'previews' => ['state' => 'partial', 'limitations' => ['Profile-specific domains can be deployed, but automated preview cleanup is not implemented.']],
@@ -92,6 +92,21 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
 
         $actions[] = 'Deploy app service through the EasyPanel API';
 
+        if (method_exists($project, 'queues')) {
+            foreach ($project->queues() as $name => $queue) {
+                if (! method_exists($queue, 'enabled') || $queue->enabled()) {
+                    $actions[] = 'Create or reuse queue worker service: '.$name;
+                }
+            }
+        }
+        if (method_exists($project, 'daemons')) {
+            foreach ($project->daemons() as $name => $daemon) {
+                if (! method_exists($daemon, 'enabled') || $daemon->enabled()) {
+                    $actions[] = 'Create or reuse daemon service: '.$name;
+                }
+            }
+        }
+
         return [
             'provider' => $this->getName(),
             'project' => $this->projectName($project),
@@ -142,6 +157,7 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
             $this->configureSource($client, $projectName, $serviceName, $source, $profile);
             $client->updateEnvironment($projectName, $serviceName, $this->environment($projectName, $profile));
             $this->applyWorkers($client, $project, $profile, $projectName, $source);
+            $this->applyDaemons($client, $project, $profile, $projectName, $source);
             $this->applyCron($client, $project, $profile, $projectName, $source);
 
             $domain = $this->normalizeDomain($this->profileValue($profile, 'domain'));
@@ -209,6 +225,7 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
             }
 
             $this->destroyWorkers($client, $project, $projectName);
+            $this->destroyDaemons($client, $project, $projectName);
             $this->destroyCron($client, $project, $projectName);
             $this->destroyDatabases($client, $project, $projectName);
             $client->destroyAppService($projectName, $serviceName);
@@ -326,6 +343,63 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
                 throw new \RuntimeException("Refusing to destroy unowned EasyPanel worker service {$workerName}.");
             }
             $client->destroyAppService($projectName, $workerName);
+        }
+    }
+
+    /** @param array<string, mixed> $source */
+    private function applyDaemons(EasyPanelClient $client, object $project, object $profile, string $projectName, array $source): void
+    {
+        if (! method_exists($project, 'daemons')) {
+            return;
+        }
+
+        foreach ($project->daemons() as $name => $daemon) {
+            if (method_exists($daemon, 'enabled') && ! $daemon->enabled()) {
+                continue;
+            }
+
+            $daemonName = 'daemon-'.$this->slug((string) $name);
+            $inventory = $client->listProjectsAndServices();
+            $service = $this->findService($inventory, $projectName, $daemonName);
+            if ($service !== null && ($service['type'] ?? null) !== 'app') {
+                throw new \RuntimeException("EasyPanel daemon service {$daemonName} is not an app service.");
+            }
+            if ($service === null) {
+                $client->createAppService($projectName, $daemonName);
+            }
+
+            $this->configureSource($client, $projectName, $daemonName, $source, $profile);
+            $client->updateEnvironment($projectName, $daemonName, $this->environment($projectName, $profile)."\nSHIPPERCLI_MANAGED_DAEMON={$daemonName}");
+            $command = method_exists($daemon, 'command') ? (string) $daemon->command() : '';
+            $directory = method_exists($daemon, 'directory') ? trim((string) $daemon->directory()) : '';
+            if ($directory !== '') {
+                $command = 'cd '.escapeshellarg($directory).' && '.$command;
+            }
+            $client->updateAppDeployment($projectName, $daemonName, ['command' => $command]);
+            $client->deployAppService($projectName, $daemonName);
+        }
+    }
+
+    private function destroyDaemons(EasyPanelClient $client, object $project, string $projectName): void
+    {
+        if (! method_exists($project, 'daemons')) {
+            return;
+        }
+
+        $inventory = $client->listProjectsAndServices();
+        foreach ($project->daemons() as $name => $daemon) {
+            $daemonName = 'daemon-'.$this->slug((string) $name);
+            if ($this->findService($inventory, $projectName, $daemonName) === null) {
+                continue;
+            }
+            $inspected = $client->inspectAppService($projectName, $daemonName);
+            $env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
+            if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
+                || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)
+                || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_DAEMON='.$daemonName)) {
+                throw new \RuntimeException("Refusing to destroy unowned EasyPanel daemon service {$daemonName}.");
+            }
+            $client->destroyAppService($projectName, $daemonName);
         }
     }
 
