@@ -245,7 +245,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             if (! method_exists($database, 'name')) {
                 continue;
             }
-            $type = method_exists($database, 'type') ? strtolower($database->type()) : 'mysql';
+            $type = $this->databaseType($database);
             $serviceName = $this->databaseServiceName($database->name());
             $inventory = $client->listProjectsAndServices();
             $service = $this->findService($inventory, $projectName, $serviceName);
@@ -436,7 +436,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             if (! method_exists($database, 'name')) {
                 continue;
             }
-            $type = method_exists($database, 'type') ? strtolower($database->type()) : 'mysql';
+            $type = $this->databaseType($database);
             $serviceName = $this->databaseServiceName($database->name());
             if ($this->findService($inventory, $projectName, $serviceName) === null) {
                 continue;
@@ -454,6 +454,17 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
     private function databaseServiceName(string $name): string
     {
         return 'db-'.$this->slug($name);
+    }
+
+    private function databaseType(object $database): string
+    {
+        $type = method_exists($database, 'type') ? strtolower(trim((string) $database->type())) : 'mysql';
+
+        return match ($type) {
+            'postgresql' => 'postgres',
+            'mongodb' => 'mongo',
+            default => $type,
+        };
     }
 
     private function slug(string $value): string

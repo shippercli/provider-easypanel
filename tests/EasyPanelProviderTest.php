@@ -173,6 +173,41 @@ final class EasyPanelProviderTest extends TestCase
         self::assertStringContainsString('SHIPPERCLI_MANAGED=1', $databaseCall[1]['env']);
     }
 
+    public function test_apply_reuses_an_existing_database_with_an_alias_type(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+                $calls[] = [$procedure, $input];
+
+                return match ($procedure) {
+                    'projects.listProjectsAndServices' => [
+                        'projects' => [['name' => 'shippercli-demo-provider-v1']],
+                        'services' => [
+                            ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'web', 'type' => 'app'],
+                            ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'db-main', 'type' => 'postgres'],
+                        ],
+                    ],
+                    'domains.listDomains' => [],
+                    default => null,
+                };
+            },
+        );
+        $project = new class {
+            public function name(): string { return 'provider'; }
+            public function repository(): array { return []; }
+            public function databases(): array { return [new class {
+                public function name(): string { return 'main'; }
+                public function type(): string { return 'postgresql'; }
+            }]; }
+        };
+
+        self::assertTrue((new EasyPanelProvider($this->config(), $client))->apply($project, $this->profile()));
+        self::assertNotContains('services.postgres.createService', array_column($calls, 0));
+    }
+
     public function test_apply_translates_named_cron_frequency_to_an_easy_panel_expression(): void
     {
         $calls = [];
