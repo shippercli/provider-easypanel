@@ -17,7 +17,7 @@ Supported:
 - Cron jobs as scheduled scripts in a managed Box service when the source is Git-backed
 - App deployment
 - Service log queries (when EasyPanel log aggregation is enabled)
-- Ownership-guarded service and empty-project cleanup
+- Ownership-guarded service and empty-project cleanup, including core orphan-preview cleanup integration
 
 Not yet supported by the provider:
 
@@ -114,7 +114,7 @@ source:
 - The service is an app service.
 - The service environment contains both Shipper ownership markers.
 
-After deleting the marked service, the provider deletes its project only when `destroy_project` is enabled and no services remain. Set `destroy_project: false` to retain empty managed projects.
+After deleting the marked service, the provider deletes its project only when `destroy_project` is enabled and no services remain. Set `destroy_project: false` to retain empty managed projects. The core orphan-preview flow enumerates marked app services through their configured domains and routes deletion through the same ownership checks.
 
 ## Development
 
