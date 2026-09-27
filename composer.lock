@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "925bebf6b5dc7f15f78a447073118caa",
+    "content-hash": "787c330b51e263d82456d10b7b6c52b4",
     "packages": [
         {
             "name": "shippercli/contracts",
