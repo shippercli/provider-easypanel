@@ -34,6 +34,45 @@ final class EasyPanelProviderTest extends TestCase
         self::assertInstanceOf(DeploymentStatusProviderInterface::class, $provider);
     }
 
+    public function test_orphan_cleanup_lists_only_owned_preview_service_domains(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+                $calls[] = [$procedure, $input];
+
+                return match ($procedure) {
+                    'projects.listProjectsAndServices' => [
+                        'projects' => [['name' => 'shippercli-demo-provider-preview']],
+                        'services' => [[
+                            'projectName' => 'shippercli-demo-provider-preview',
+                            'name' => 'web',
+                            'type' => 'app',
+                        ]],
+                    ],
+                    'services.app.inspectService' => [
+                        'env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-preview",
+                    ],
+                    'domains.listDomains' => [['host' => 'preview.example.com']],
+                    default => [],
+                };
+            },
+        );
+        $provider = new EasyPanelProvider($this->config(), $client);
+
+        $sites = $provider->listSites($this->project(), new class {
+            public function name(): string { return 'preview'; }
+            public function get(string $key): mixed { return $key === 'domain' ? 'preview.example.com' : null; }
+        });
+
+        self::assertCount(1, $sites);
+        self::assertSame('preview.example.com', $sites[0]['domain']);
+        self::assertIsInt($sites[0]['site_id']);
+        self::assertSame('projects.listProjectsAndServices', $calls[0][0]);
+    }
+
     public function test_logs_query_uses_the_derived_managed_service(): void
     {
         $calls = [];

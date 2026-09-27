@@ -18,6 +18,9 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
 
     private ?EasyPanelClient $client;
 
+    /** @var array<int, array{project: string, service: string}> */
+    private array $previewSiteTargets = [];
+
     private string $lastError = '';
 
     /** @param array<string, mixed> $config */
@@ -44,7 +47,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             'background_workloads' => ['state' => 'partial', 'limitations' => ['Queue workers are provisioned as managed app services; other workload types are not modeled.']],
             'observability' => ['state' => 'partial', 'limitations' => ['Service logs require EasyPanel log aggregation to be enabled.']],
             'rollback' => ['state' => 'unsupported'],
-            'previews' => ['state' => 'partial', 'limitations' => ['Profile-specific domains can be deployed, but automated preview cleanup is not implemented.']],
+            'previews' => ['state' => 'partial', 'limitations' => ['Owned preview services can be enumerated and removed through the core orphan-cleanup flow; EasyPanel domain cleanup remains provider API dependent.']],
             'server_lifecycle' => ['state' => 'unsupported'],
         ];
     }
@@ -228,6 +231,51 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
 
             return false;
         }
+    }
+
+    /** @return array<int, array{site_id: int, domain: string}> */
+    public function listSites(object $project, object $profile): array
+    {
+        $projectName = $this->managedProjectName($project, $profile);
+        $serviceName = $this->serviceName();
+        $inventory = $this->getClient()->listProjectsAndServices();
+        $service = $this->findService($inventory, $projectName, $serviceName);
+        if ($service === null || ($service['type'] ?? null) !== 'app') {
+            return [];
+        }
+
+        $inspected = $this->getClient()->inspectAppService($projectName, $serviceName);
+        $env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
+        if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
+            || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
+            return [];
+        }
+
+        $siteId = $this->previewSiteId($projectName, $serviceName);
+        $this->previewSiteTargets[$siteId] = ['project' => $projectName, 'service' => $serviceName];
+        $domains = $this->getClient()->listDomains($projectName, $serviceName);
+        $sites = [];
+        foreach ($domains as $domain) {
+            $host = $domain['host'] ?? ($domain['domain'] ?? null);
+            if (is_string($host) && $host !== '') {
+                $sites[] = ['site_id' => $siteId, 'domain' => $host];
+            }
+        }
+
+        return $sites;
+    }
+
+    public function deleteSiteWithDatabases(object $project, object $profile, int $siteId): bool
+    {
+        $projectName = $this->managedProjectName($project, $profile);
+        $expectedId = $this->previewSiteId($projectName, $this->serviceName());
+        if ($siteId !== $expectedId) {
+            $this->lastError = 'Refusing to destroy an EasyPanel preview target with an invalid site ID.';
+
+            return false;
+        }
+
+        return $this->destroy($project, $profile);
     }
 
     public function getLastError(): string
@@ -844,6 +892,13 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
     private function serviceName(): string
     {
         return $this->stringConfig('service_name', 'app');
+    }
+
+    private function previewSiteId(string $projectName, string $serviceName): int
+    {
+        $id = (int) sprintf('%u', crc32($projectName."\0".$serviceName));
+
+        return $id > 0 ? $id : 1;
     }
 
     private function authToken(): string
