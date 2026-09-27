@@ -68,14 +68,14 @@ final class EasyPanelClient
         ]);
     }
 
-    public function cloneBoxRepository(string $projectName, string $serviceName, string $url, string $branch): void
+    public function cloneBoxRepository(string $projectName, string $serviceName, string $url, string $branch, bool $private = false): void
     {
         $this->call('services.box.cloneGitRepository', [
             'projectName' => $projectName,
             'serviceName' => $serviceName,
             'url' => $url,
             'branch' => $branch,
-            'private' => false,
+            'private' => $private,
         ]);
     }
 
@@ -84,7 +84,7 @@ final class EasyPanelClient
         $this->call('services.box.updateEnv', [
             'projectName' => $projectName,
             'serviceName' => $serviceName,
-            'env' => $env,
+            'env' => ['content' => $env],
         ]);
     }
 
@@ -282,10 +282,11 @@ final class EasyPanelClient
     /** @param array<string, mixed> $filters @return array<int, array<string, mixed>> */
     public function queryServiceLogs(string $projectName, string $serviceName, array $filters = []): array
     {
+        $allowedFilters = array_intersect_key($filters, array_flip(['start', 'end', 'limit', 'search', 'levels', 'stream']));
         $data = $this->call('logs.queryServiceLogs', [
+            ...$allowedFilters,
             'projectName' => $projectName,
             'serviceName' => $serviceName,
-            ...$filters,
         ]);
 
         if (! is_array($data)) {

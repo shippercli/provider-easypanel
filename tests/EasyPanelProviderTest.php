@@ -61,6 +61,19 @@ final class EasyPanelProviderTest extends TestCase
         self::assertSame(25, $calls[0][1]['limit']);
     }
 
+    public function test_logs_limit_is_clamped_to_the_api_maximum(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient('https://panel.example.com', 'token', transport: static function (string $procedure, array $input) use (&$calls): array {
+            $calls[] = [$procedure, $input];
+            return ['logs' => []];
+        });
+
+        (new EasyPanelProvider($this->config(), $client))->logs($this->project(), $this->profile(), 5000);
+
+        self::assertSame(1000, $calls[0][1]['limit']);
+    }
+
     public function test_status_inspects_the_derived_managed_service(): void
     {
         $calls = [];
@@ -170,7 +183,10 @@ final class EasyPanelProviderTest extends TestCase
         $databaseCall = $calls[array_search('services.postgres.createService', array_column($calls, 0), true)];
         self::assertSame('db-main', $databaseCall[1]['serviceName']);
         self::assertSame('app', $databaseCall[1]['user']);
+        self::assertSame('main', $databaseCall[1]['databaseName']);
         self::assertStringContainsString('SHIPPERCLI_MANAGED=1', $databaseCall[1]['env']);
+        $environmentCalls = array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'services.app.updateEnv'));
+        self::assertStringContainsString('DB_PASSWORD=', $environmentCalls[0][1]['env']);
     }
 
     public function test_apply_reuses_an_existing_database_with_an_alias_type(): void
@@ -244,6 +260,10 @@ final class EasyPanelProviderTest extends TestCase
         self::assertCount(1, $scriptCall);
         self::assertSame('0 0 * * *', $scriptCall[0][1]['scripts'][0]['schedule']);
         self::assertSame('php artisan schedule:run', $scriptCall[0][1]['scripts'][0]['content']);
+        self::assertNotEmpty($scriptCall[0][1]['scripts'][0]['webhookToken']);
+        $cloneCalls = array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'services.box.cloneGitRepository'));
+        self::assertCount(1, $cloneCalls);
+        self::assertFalse($cloneCalls[0][1]['private']);
     }
 
     public function test_destroy_refuses_a_service_without_ownership_markers(): void

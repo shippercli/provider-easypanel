@@ -124,6 +124,36 @@ final class EasyPanelClientTest extends TestCase
         self::assertSame('0 9 * * 1', $calls[0][1]['scripts'][0]['schedule']);
     }
 
+    public function test_box_environment_uses_the_openapi_content_shape(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient('https://panel.example.com', 'token', transport: static function (string $procedure, array $input) use (&$calls): null {
+            $calls[] = [$procedure, $input];
+            return null;
+        });
+
+        $client->updateBoxEnvironment('shipper-demo', 'scheduler', "APP_ENV=production\n");
+
+        self::assertSame(['content' => "APP_ENV=production\n"], $calls[0][1]['env']);
+    }
+
+    public function test_log_filters_cannot_override_the_managed_service(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient('https://panel.example.com', 'token', transport: static function (string $procedure, array $input) use (&$calls): array {
+            $calls[] = [$procedure, $input];
+            return [];
+        });
+
+        $client->queryServiceLogs('managed', 'web', ['limit' => 20, 'projectName' => 'other', 'serviceName' => 'other', 'unexpected' => true]);
+
+        self::assertSame([
+            'limit' => 20,
+            'projectName' => 'managed',
+            'serviceName' => 'web',
+        ], $calls[0][1]);
+    }
+
     public function test_it_redacts_connection_values_from_debug_output(): void
     {
         $client = new EasyPanelClient('https://private-panel.example.com', 'private-token');

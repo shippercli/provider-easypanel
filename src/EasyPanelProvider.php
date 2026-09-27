@@ -137,14 +137,14 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                 $client->createAppService($projectName, $serviceName);
             }
 
-            $this->applyDatabases($client, $project, $projectName);
+            $databaseEnvironment = $this->applyDatabases($client, $project, $projectName);
 
             $source = $this->source($project, $profile);
             \assert($source !== null);
             $this->configureSource($client, $projectName, $serviceName, $source, $profile);
-            $client->updateEnvironment($projectName, $serviceName, $this->environment($projectName, $profile));
-            $this->applyWorkers($client, $project, $profile, $projectName, $source);
-            $this->applyCron($client, $project, $profile, $projectName, $source);
+            $client->updateEnvironment($projectName, $serviceName, $this->environment($projectName, $profile, $databaseEnvironment));
+            $this->applyWorkers($client, $project, $profile, $projectName, $source, $databaseEnvironment);
+            $this->applyCron($client, $project, $profile, $projectName, $source, $databaseEnvironment);
 
             $domain = $this->normalizeDomain($this->profileValue($profile, 'domain'));
             if ($domain !== null && ! $this->domainExists($client->listDomains($projectName, $serviceName), $domain)) {
@@ -235,12 +235,14 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         return $this->lastError;
     }
 
-    private function applyDatabases(EasyPanelClient $client, object $project, string $projectName): void
+    /** @return array<string, string> */
+    private function applyDatabases(EasyPanelClient $client, object $project, string $projectName): array
     {
         if (! method_exists($project, 'databases')) {
-            return;
+            return [];
         }
 
+        $environment = [];
         foreach ($project->databases() as $database) {
             if (! method_exists($database, 'name')) {
                 continue;
@@ -257,19 +259,33 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             }
 
             $password = (string) ($this->config['database_password'] ?? bin2hex(random_bytes(16)));
+            $databaseName = $this->databaseIdentifier($database->name());
+            $username = method_exists($database, 'user') ? $this->databaseIdentifier($database->user()) : 'shipper';
             $payload = [
-                'databaseName' => $this->slug($database->name()),
-                'user' => method_exists($database, 'user') ? $this->slug($database->user()) : 'shipper',
+                'databaseName' => $databaseName,
+                'user' => $username,
                 'password' => $password,
                 'rootPassword' => (string) ($this->config['database_root_password'] ?? bin2hex(random_bytes(20))),
                 'env' => self::MANAGED_MARKER."\nSHIPPERCLI_MANAGED_PROJECT={$projectName}",
             ];
             $client->createDatabaseService($type, $projectName, $serviceName, $payload);
+
+            if ($environment === []) {
+                $environment = [
+                    'DB_HOST' => $serviceName,
+                    'DB_DATABASE' => $databaseName,
+                    'DB_USERNAME' => $username,
+                    'DB_PASSWORD' => $password,
+                ];
+            }
         }
+
+        return $environment;
     }
 
     /** @param array<string, mixed> $source */
-    private function applyWorkers(EasyPanelClient $client, object $project, object $profile, string $projectName, array $source): void
+    /** @param array<string, string> $databaseEnvironment */
+    private function applyWorkers(EasyPanelClient $client, object $project, object $profile, string $projectName, array $source, array $databaseEnvironment = []): void
     {
         if (! method_exists($project, 'queues')) {
             return;
@@ -290,7 +306,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             }
 
             $this->configureSource($client, $projectName, $workerName, $source, $profile);
-            $client->updateEnvironment($projectName, $workerName, $this->environment($projectName, $profile)."\nSHIPPERCLI_MANAGED_WORKER={$workerName}");
+            $client->updateEnvironment($projectName, $workerName, $this->environment($projectName, $profile, $databaseEnvironment)."\nSHIPPERCLI_MANAGED_WORKER={$workerName}");
             $connection = method_exists($queue, 'connection') ? $queue->connection() : 'database';
             $queueName = method_exists($queue, 'queue') ? $queue->queue() : 'default';
             $command = "php artisan queue:work {$connection} --queue={$queueName}";
@@ -332,7 +348,8 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
     }
 
     /** @param array<string, mixed> $source */
-    private function applyCron(EasyPanelClient $client, object $project, object $profile, string $projectName, array $source): void
+    /** @param array<string, string> $databaseEnvironment */
+    private function applyCron(EasyPanelClient $client, object $project, object $profile, string $projectName, array $source, array $databaseEnvironment = []): void
     {
         if (! method_exists($project, 'cron') || $project->cron() === []) {
             return;
@@ -344,19 +361,22 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         if ($service !== null && ($service['type'] ?? null) !== 'box') {
             throw new \RuntimeException('EasyPanel scheduler service name is already used by a non-Box service.');
         }
-        $created = $service === null;
-        if ($created) {
+        if ($service === null) {
             $client->createBoxService($projectName, $serviceName);
         }
 
         $repository = $this->cronRepository($source);
-        if ($created) {
-            $client->cloneBoxRepository($projectName, $serviceName, $repository, $this->profileBranch($profile));
-        }
+        $client->cloneBoxRepository(
+            $projectName,
+            $serviceName,
+            $repository,
+            $this->profileBranch($profile),
+            $this->privateRepository($source),
+        );
         $client->updateBoxEnvironment(
             $projectName,
             $serviceName,
-            $this->environment($projectName, $profile)."\nSHIPPERCLI_MANAGED_CRON={$serviceName}",
+            $this->environment($projectName, $profile, $databaseEnvironment)."\nSHIPPERCLI_MANAGED_CRON={$serviceName}",
         );
 
         $scripts = [];
@@ -369,6 +389,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                 'content' => method_exists($cron, 'command') ? $cron->command() : '',
                 'schedule' => $this->cronSchedule(method_exists($cron, 'frequency') ? $cron->frequency() : 'daily'),
                 'enabled' => true,
+                'webhookToken' => $this->cronWebhookToken($projectName, (string) $name),
             ];
         }
         $client->updateBoxScripts($projectName, $serviceName, $scripts);
@@ -469,7 +490,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
 
     private function slug(string $value): string
     {
-        $slug = strtolower((string) preg_replace('/[^a-z0-9]+/', '-', $value));
+        $slug = (string) preg_replace('/[^a-z0-9]+/', '-', strtolower($value));
         $slug = trim($slug, '-');
 
         return $slug !== '' ? substr($slug, 0, 48) : 'database';
@@ -481,7 +502,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         $records = $this->getClient()->queryServiceLogs(
             $this->managedProjectName($project, $profile),
             $this->serviceName(),
-            ['limit' => max(1, $lines)],
+            ['limit' => min(1000, max(1, $lines))],
         );
 
         return array_values(array_map(
@@ -681,7 +702,8 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         };
     }
 
-    private function environment(string $projectName, object $profile): string
+    /** @param array<string, string> $additional */
+    private function environment(string $projectName, object $profile, array $additional = []): string
     {
         $lines = [];
         foreach ([$this->config['env'] ?? null, $this->profileValue($profile, 'env'), $this->profileValue($profile, 'environment')] as $value) {
@@ -694,6 +716,10 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                     }
                 }
             }
+        }
+
+        foreach ($additional as $key => $value) {
+            $lines[] = $key.'='.$value;
         }
 
         $lines[] = self::MANAGED_MARKER;
@@ -827,6 +853,33 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         $slug = \trim($slug, '-');
 
         return $slug !== '' ? $slug : 'unnamed';
+    }
+
+    private function databaseIdentifier(string $value): string
+    {
+        $identifier = strtolower((string) preg_replace('/[^a-z0-9_]+/', '_', $value));
+        $identifier = trim($identifier, '_');
+        if ($identifier === '' || ! preg_match('/^[a-z]/', $identifier)) {
+            $identifier = 'db_'.$identifier;
+        }
+
+        return substr($identifier, 0, 63);
+    }
+
+    /** @param array<string, mixed> $source */
+    private function privateRepository(array $source): bool
+    {
+        return ($source['private'] ?? $this->config['private_repository'] ?? false) === true;
+    }
+
+    private function cronWebhookToken(string $projectName, string $name): string
+    {
+        $configured = $this->stringConfig('cron_webhook_token');
+        if ($configured !== '') {
+            return $configured;
+        }
+
+        return hash_hmac('sha256', $projectName.'/'.$name, $this->authToken());
     }
 
     private function stringConfig(string $key, string $default = ''): string
