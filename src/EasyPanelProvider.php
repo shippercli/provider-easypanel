@@ -367,12 +367,34 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             $scripts[] = [
                 'name' => $this->slug((string) $name),
                 'content' => method_exists($cron, 'command') ? $cron->command() : '',
-                'schedule' => method_exists($cron, 'frequency') ? $cron->frequency() : 'daily',
+                'schedule' => $this->cronSchedule(method_exists($cron, 'frequency') ? $cron->frequency() : 'daily'),
                 'enabled' => true,
             ];
         }
         $client->updateBoxScripts($projectName, $serviceName, $scripts);
         $client->restartBoxService($projectName, $serviceName);
+    }
+
+    private function cronSchedule(string $frequency): string
+    {
+        $frequency = trim($frequency);
+        if ($frequency === '') {
+            throw new \RuntimeException('EasyPanel cron frequency must be a cron expression or a supported alias.');
+        }
+
+        if (preg_match('/^\S+\s+\S+\s+\S+\s+\S+\s+\S+$/', $frequency) === 1) {
+            return $frequency;
+        }
+
+        return match (strtolower($frequency)) {
+            'every_minute', 'every-minute', 'minutely' => '* * * * *',
+            'hourly' => '0 * * * *',
+            'daily' => '0 0 * * *',
+            'weekly' => '0 0 * * 0',
+            'monthly' => '0 0 1 * *',
+            'yearly', 'annually' => '0 0 1 1 *',
+            default => throw new \RuntimeException("Unsupported EasyPanel cron frequency: {$frequency}. Use a five-field cron expression."),
+        };
     }
 
     /** @param array<string, mixed> $source */

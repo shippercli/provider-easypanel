@@ -173,6 +173,44 @@ final class EasyPanelProviderTest extends TestCase
         self::assertStringContainsString('SHIPPERCLI_MANAGED=1', $databaseCall[1]['env']);
     }
 
+    public function test_apply_translates_named_cron_frequency_to_an_easy_panel_expression(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+                $calls[] = [$procedure, $input];
+
+                return match ($procedure) {
+                    'projects.listProjectsAndServices' => ['projects' => [], 'services' => []],
+                    'domains.listDomains' => [],
+                    default => null,
+                };
+            },
+        );
+        $project = new class {
+            public function name(): string { return 'provider'; }
+            public function repository(): array { return []; }
+            public function cron(): array { return ['nightly' => new class {
+                public function command(): string { return 'php artisan schedule:run'; }
+                public function frequency(): string { return 'daily'; }
+                public function enabled(): bool { return true; }
+            }]; }
+        };
+        $config = [
+            ...$this->config(),
+            'source' => ['type' => 'git', 'repo' => 'https://github.com/example/app.git'],
+        ];
+
+        self::assertTrue((new EasyPanelProvider($config, $client))->apply($project, $this->profile()));
+
+        $scriptCall = array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'services.box.updateScripts'));
+        self::assertCount(1, $scriptCall);
+        self::assertSame('0 0 * * *', $scriptCall[0][1]['scripts'][0]['schedule']);
+        self::assertSame('php artisan schedule:run', $scriptCall[0][1]['scripts'][0]['content']);
+    }
+
     public function test_destroy_refuses_a_service_without_ownership_markers(): void
     {
         $calls = [];
