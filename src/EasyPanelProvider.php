@@ -68,6 +68,13 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
             $errors[] = 'EasyPanel profile domain must be a valid hostname or URL.';
         }
 
+        if (isset($this->config['resources']) && ! is_array($this->config['resources'])) {
+            $errors[] = 'EasyPanel resources configuration must be an object/map.';
+        }
+        if (isset($this->config['mounts']) && ! is_array($this->config['mounts'])) {
+            $errors[] = 'EasyPanel mounts configuration must be a list.';
+        }
+
         return $errors;
     }
 
@@ -91,6 +98,13 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
         }
 
         $actions[] = 'Deploy app service through the EasyPanel API';
+
+        if (is_array($this->config['resources'] ?? null) && $this->config['resources'] !== []) {
+            $actions[] = 'Apply EasyPanel app resource limits';
+        }
+        if (is_array($this->config['mounts'] ?? null) && $this->config['mounts'] !== []) {
+            $actions[] = 'Reconcile EasyPanel app mounts';
+        }
 
         if (method_exists($project, 'queues')) {
             foreach ($project->queues() as $name => $queue) {
@@ -156,6 +170,7 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
             \assert($source !== null);
             $this->configureSource($client, $projectName, $serviceName, $source, $profile);
             $client->updateEnvironment($projectName, $serviceName, $this->environment($projectName, $profile));
+            $this->applyServiceConfiguration($client, $projectName, $serviceName);
             $this->applyWorkers($client, $project, $profile, $projectName, $source);
             $this->applyDaemons($client, $project, $profile, $projectName, $source);
             $this->applyCron($client, $project, $profile, $projectName, $source);
@@ -280,6 +295,32 @@ final class EasyPanelProvider implements DeploymentProviderInterface, ProviderCa
                 'env' => self::MANAGED_MARKER."\nSHIPPERCLI_MANAGED_PROJECT={$projectName}",
             ];
             $client->createDatabaseService($type, $projectName, $serviceName, $payload);
+        }
+    }
+
+    private function applyServiceConfiguration(EasyPanelClient $client, string $projectName, string $serviceName): void
+    {
+        $resources = $this->config['resources'] ?? [];
+        if (is_array($resources) && $resources !== []) {
+            $client->updateAppResources($projectName, $serviceName, $resources);
+        }
+
+        $mounts = $this->config['mounts'] ?? [];
+        if (! is_array($mounts) || $mounts === []) {
+            return;
+        }
+
+        $inspected = $client->inspectAppService($projectName, $serviceName);
+        $existing = is_array($inspected['mounts'] ?? null) ? array_values($inspected['mounts']) : [];
+        foreach (array_values($mounts) as $index => $mount) {
+            if (! is_array($mount) || ! isset($mount['mountPath'])) {
+                throw new \RuntimeException('Each EasyPanel mount must define mountPath and values.');
+            }
+            if (isset($existing[$index]) && is_array($existing[$index])) {
+                $client->updateMount($projectName, $serviceName, $index, $mount);
+            } else {
+                $client->createMount($projectName, $serviceName, $mount);
+            }
         }
     }
 

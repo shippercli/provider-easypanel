@@ -18,12 +18,13 @@ Supported:
 - Cron jobs as scheduled scripts in a managed Box service when the source is Git-backed
 - App deployment
 - Service log queries (when EasyPanel log aggregation is enabled)
+- App resource limits and owned service mounts
 - Ownership-guarded service and empty-project cleanup
 
 Not yet supported by the provider:
 
 - Rollback
-- Resource limits, mounts, and persistent-volume lifecycle
+- Persistent-volume lifecycle beyond configured service mounts
 
 EasyPanel may provide those capabilities in its UI, but this package does not claim support until their API behavior and cleanup semantics have dedicated tests.
 

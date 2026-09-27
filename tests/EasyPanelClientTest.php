@@ -100,6 +100,28 @@ final class EasyPanelClientTest extends TestCase
         self::assertSame('php artisan queue:work', $calls[0][1]['deploy']['command']);
     }
 
+    public function test_it_updates_app_resources_and_mounts(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): null {
+                $calls[] = [$procedure, $input];
+
+                return null;
+            },
+        );
+
+        $client->updateAppResources('shipper-demo', 'web', ['cpu' => 1, 'memory' => 512]);
+        $client->createMount('shipper-demo', 'web', ['hostPath' => '/data', 'mountPath' => '/app/data', 'type' => 'bind']);
+        $client->updateMount('shipper-demo', 'web', 0, ['hostPath' => '/data', 'mountPath' => '/app/data', 'type' => 'bind']);
+
+        self::assertSame(['services.app.updateResources', 'mounts.createMount', 'mounts.updateMount'], array_column($calls, 0));
+        self::assertSame(512, $calls[0][1]['resources']['memory']);
+        self::assertSame(0, $calls[2][1]['index']);
+    }
+
     public function test_it_configures_scheduled_box_scripts(): void
     {
         $calls = [];

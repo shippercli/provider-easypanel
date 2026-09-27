@@ -117,6 +117,37 @@ final class EasyPanelProviderTest extends TestCase
         self::assertStringContainsString('SHIPPERCLI_MANAGED=1', $databaseCall[1]['env']);
     }
 
+    public function test_apply_reconciles_configured_resources_and_mounts(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+                $calls[] = [$procedure, $input];
+
+                return match ($procedure) {
+                    'projects.listProjectsAndServices' => ['projects' => [], 'services' => []],
+                    'domains.listDomains' => [],
+                    'services.app.inspectService' => ['mounts' => []],
+                    default => null,
+                };
+            },
+        );
+        $config = [
+            ...$this->config(),
+            'resources' => ['cpu' => 1, 'memory' => 512],
+            'mounts' => [['hostPath' => '/data', 'mountPath' => '/app/data', 'type' => 'bind']],
+        ];
+        $provider = new EasyPanelProvider($config, $client);
+
+        self::assertTrue($provider->apply($this->project(), $this->profile()));
+        self::assertContains('services.app.updateResources', array_column($calls, 0));
+        self::assertContains('mounts.createMount', array_column($calls, 0));
+        $resourceCall = $calls[array_search('services.app.updateResources', array_column($calls, 0), true)];
+        self::assertSame(512, $resourceCall[1]['resources']['memory']);
+    }
+
     public function test_apply_provisions_and_configures_a_daemon_app_service(): void
     {
         $calls = [];
