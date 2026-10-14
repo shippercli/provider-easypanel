@@ -132,6 +132,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             }
 
             $service = $this->findService($inventory, $projectName, $serviceName);
+            $existingEnvironment = '';
             if ($service !== null && ($service['type'] ?? null) !== 'app') {
                 throw new \RuntimeException('The managed EasyPanel service name is already used by a non-app service.');
             }
@@ -139,6 +140,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             if ($service !== null) {
                 $inspected = $client->inspectAppService($projectName, $serviceName);
                 $env = \is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
+                $existingEnvironment = $env;
                 if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
                     || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
                     throw new \RuntimeException('Refusing to modify an EasyPanel service without Shipper ownership markers.');
@@ -154,7 +156,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             $source = $this->source($project, $profile);
             \assert($source !== null);
             $this->configureSource($client, $projectName, $serviceName, $source, $profile);
-            $client->updateEnvironment($projectName, $serviceName, $this->environment($projectName, $profile, $databaseEnvironment));
+            $client->updateEnvironment($projectName, $serviceName, $this->environment($projectName, $profile, $databaseEnvironment, $existingEnvironment));
             $this->applyWorkers($client, $project, $profile, $projectName, $source, $databaseEnvironment);
             $this->applyCron($client, $project, $profile, $projectName, $source, $databaseEnvironment);
 
@@ -809,9 +811,9 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
     }
 
     /** @param array<string, string> $additional */
-    private function environment(string $projectName, object $profile, array $additional = []): string
+    private function environment(string $projectName, object $profile, array $additional = [], string $existing = ''): string
     {
-        $lines = [];
+        $lines = $existing === '' ? [] : [$existing];
         foreach ([$this->config['env'] ?? null, $this->profileValue($profile, 'env'), $this->profileValue($profile, 'environment')] as $value) {
             if (\is_string($value) && \trim($value) !== '') {
                 $lines[] = \trim($value);

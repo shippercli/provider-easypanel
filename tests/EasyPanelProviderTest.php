@@ -309,8 +309,8 @@ final class EasyPanelProviderTest extends TestCase
                             ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'db-main', 'type' => 'postgres'],
                         ],
                     ],
-                    'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1"],
-                'domains.listDomains' => [],
+                    'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1\nDB_HOST=db-main\nDB_PASSWORD=retained-secret"],
+                    'domains.listDomains' => [],
                     default => null,
                 };
             },
@@ -326,6 +326,10 @@ final class EasyPanelProviderTest extends TestCase
 
         self::assertTrue((new EasyPanelProvider($this->config(), $client))->apply($project, $this->profile()));
         self::assertNotContains('services.postgres.createService', array_column($calls, 0));
+        $updates = array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'services.app.updateEnv'));
+        self::assertCount(1, $updates);
+        self::assertStringContainsString('DB_PASSWORD=retained-secret', $updates[0][1]['env']);
+        self::assertStringContainsString('DB_HOST=db-main', $updates[0][1]['env']);
     }
 
     public function test_apply_translates_named_cron_frequency_to_an_easy_panel_expression(): void
