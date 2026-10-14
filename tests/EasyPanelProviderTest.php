@@ -238,6 +238,7 @@ final class EasyPanelProviderTest extends TestCase
                     ],
                 ],
                 'services.postgres.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1"],
+                'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1"],
                 'domains.listDomains' => [],
                 default => null,
             };
@@ -308,7 +309,8 @@ final class EasyPanelProviderTest extends TestCase
                             ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'db-main', 'type' => 'postgres'],
                         ],
                     ],
-                    'domains.listDomains' => [],
+                    'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1"],
+                'domains.listDomains' => [],
                     default => null,
                 };
             },
@@ -366,6 +368,36 @@ final class EasyPanelProviderTest extends TestCase
         $cloneCalls = array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'services.box.cloneGitRepository'));
         self::assertCount(1, $cloneCalls);
         self::assertFalse($cloneCalls[0][1]['private']);
+    }
+
+    public function test_apply_refuses_an_unmanaged_service_before_any_mutation(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+                $calls[] = [$procedure, $input];
+
+                return match ($procedure) {
+                    'projects.listProjectsAndServices' => [
+                        'projects' => [['name' => 'shippercli-demo-provider-v1']],
+                        'services' => [[
+                            'projectName' => 'shippercli-demo-provider-v1',
+                            'name' => 'web',
+                            'type' => 'app',
+                        ]],
+                    ],
+                    'services.app.inspectService' => ['env' => 'APP_ENV=production'],
+                    default => null,
+                };
+            },
+        );
+        $provider = new EasyPanelProvider($this->config(), $client);
+
+        self::assertFalse($provider->apply($this->project(), $this->profile()));
+        self::assertStringContainsString('without Shipper ownership markers', $provider->getLastError());
+        self::assertSame(['projects.listProjectsAndServices', 'services.app.inspectService'], \array_column($calls, 0));
     }
 
     public function test_destroy_refuses_a_service_without_ownership_markers(): void

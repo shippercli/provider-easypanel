@@ -136,6 +136,15 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                 throw new \RuntimeException('The managed EasyPanel service name is already used by a non-app service.');
             }
 
+            if ($service !== null) {
+                $inspected = $client->inspectAppService($projectName, $serviceName);
+                $env = \is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
+                if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
+                    || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
+                    throw new \RuntimeException('Refusing to modify an EasyPanel service without Shipper ownership markers.');
+                }
+            }
+
             if ($service === null) {
                 $client->createAppService($projectName, $serviceName);
             }
