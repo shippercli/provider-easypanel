@@ -951,7 +951,14 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
 
     private function hasEnvironmentLine(string $env, string $line): bool
     {
-        return \in_array($line, \preg_split('/\R/', $env) ?: [], true);
+        [$key, $expected] = explode('=', $line, 2);
+        try {
+            $values = \Dotenv\Dotenv::parse($env);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return ($values[$key] ?? null) === $expected;
     }
 
     /** @param array{projects: array<int, array<string, mixed>>, services: array<int, array<string, mixed>>} $inventory */
