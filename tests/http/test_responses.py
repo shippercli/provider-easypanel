@@ -21,7 +21,18 @@ class ResponsesTest(unittest.TestCase):
                 body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
                 received.append((self.path, self.headers.get('Authorization'), body))
                 procedure = self.path.rsplit('/', 1)[-1]
-                if self.path.startswith('/database-password/'):
+                if self.path.startswith('/status-safety/'):
+                    case, project = self.path.split('/')[2:4]
+                    if procedure == 'projects.listProjectsAndServices':
+                        data = {'projects': [{'name': project}], 'services': [{'projectName': project, 'name': 'app', 'type': 'app'}]}
+                    else:
+                        if procedure != 'services.app.inspectService': raise AssertionError('Status must only inspect')
+                        data = {'env': 'DB_PASSWORD=synthetic-status-secret', 'source': {'token': 'synthetic-status-secret'}}
+                        if case == 'running': data['status'] = 'running'
+                        if case == 'invalid': data['status'] = False
+                        if case == 'url': data['status'] = 'https://user:synthetic-status-secret@example.test'
+                    status, payload = 200, json.dumps({'json': data}).encode()
+                elif self.path.startswith('/database-password/'):
                     if procedure == 'projects.listProjectsAndServices':
                         data = {'projects': [], 'services': []}
                     else:
@@ -154,7 +165,7 @@ class ResponsesTest(unittest.TestCase):
                     procedures = [path.rsplit('/', 1)[-1] for path, _, _ in received if path.startswith('/workload-delete/' + kind + '/malformed/')]
                     self.assertEqual(len(procedures), 1)
                     self.assertTrue(procedures[0].endswith('.inspectService'))
-                self.assertEqual(len(received), 244)
+                self.assertEqual(len(received), 252)
                 self.assertTrue(all(auth == 'synthetic-authorization-secret' for _, auth, _ in received))
                 self.assertEqual(sum(b'synthetic-body-secret' in body for _, _, body in received), 26)
                 for case in ['absent', 'retain-project', 'other-service', 'pending-app', 'pending-project', 'unreadable']:

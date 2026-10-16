@@ -193,3 +193,20 @@ if ($connection['DB_PASSWORD'] !== $literalPassword || $connection['DB_DATABASE'
     throw new RuntimeException('Explicit EasyPanel database connection changed');
 }
 echo "Literal explicit password and normalized identity passed real HTTP creation\n";
+
+
+foreach (['running', 'missing', 'invalid', 'url'] as $case) {
+    $project = new class { public function name(): string { return 'fixture'; } };
+    $profile = new class { public function name(): string { return 'production'; } };
+    $temporary = new \ShipperCli\ProviderEasyPanel\EasyPanelProvider;
+    $name = (new ReflectionMethod($temporary, 'managedProjectName'))->invoke($temporary, $project, $profile);
+    $api = new EasyPanelClient($argv[1].'/status-safety/'.$case.'/'.$name, 'synthetic-authorization-secret');
+    $provider = new \ShipperCli\ProviderEasyPanel\EasyPanelProvider([], $api);
+    $status = $provider->status($project, $profile);
+    if ($status['state'] !== ($case === 'running' ? 'running' : 'unknown')
+        || str_contains(json_encode($status), 'synthetic-status-secret')
+        || array_keys($status) !== ['provider', 'state', 'project', 'service']) {
+        throw new RuntimeException('Status leaked inspection data or invented a successful state');
+    }
+}
+echo "Four real HTTP status privacy and unknown-state controls passed\n";

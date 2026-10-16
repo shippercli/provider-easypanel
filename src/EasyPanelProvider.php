@@ -826,10 +826,9 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
 
         return [
             'provider' => $this->getName(),
-            'state' => is_string($serviceState) && $serviceState !== '' ? $serviceState : 'deployed',
+            'state' => is_string($serviceState) && preg_match('/\A[a-z][a-z0-9_-]{0,63}\z/i', $serviceState) === 1 ? $serviceState : 'unknown',
             'project' => $projectName,
             'service' => $serviceName,
-            'service_state' => $inspection,
         ];
     }
 

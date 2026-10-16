@@ -303,3 +303,19 @@ reapply refuses mismatching application credentials rather than renaming or
 recreating the database. Review actual database/user names before upgrading an
 existing mixed-case declaration. Preserve its data and credentials and plan an
 explicit migration; changing a declaration can change the targeted service.
+
+## Status output and deployment evidence
+
+Status returns only provider, project, service and an observed state token. It no
+longer includes raw `service_state` inspection data, which can contain environment
+secrets, source credentials or registry authentication. Consumers using that raw
+field must stop depending on it. Missing or malformed state is reported as
+`unknown`, not an invented `deployed` result.
+
+The current apply flow calls the EasyPanel deployment endpoint and returns after
+that call succeeds. It does not track a unique deployment through build and
+runtime completion. The public API reference documents a null deploy response and
+no concrete inspection response schema; do not infer completion from an invented
+field. A reliable completion contract and live account lifecycle verification
+remain required. See [deploy API](https://easypanel.io/docs/api/services/app/deployAppService)
+and [inspection API](https://easypanel.io/docs/api/services/app/inspectAppService).

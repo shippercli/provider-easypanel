@@ -146,10 +146,6 @@ final class EasyPanelProviderTest extends TestCase
             'state' => 'running',
             'project' => 'shippercli-demo-provider-v1-811454f76c57a1580028',
             'service' => 'web',
-            'service_state' => [
-                'status' => 'running',
-                'image' => 'example/app:latest',
-            ],
         ], $provider->status($this->project(), $this->profile()));
         self::assertSame('projects.listProjectsAndServices', $calls[0][0]);
         self::assertSame('services.app.inspectService', $calls[1][0]);
