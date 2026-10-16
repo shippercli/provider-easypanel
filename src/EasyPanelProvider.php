@@ -57,6 +57,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         $errors = $this->validateConnectionConfig();
         try {
             $this->databaseEnvironmentPrefixes($project);
+            $this->assertUniqueWorkloadNames($project);
             $this->environment('validation', $profile, [], '', $project);
         } catch (\InvalidArgumentException $exception) {
             $errors[] = $exception->getMessage();
@@ -667,6 +668,26 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         }
 
         return method_exists($project, $method);
+    }
+
+    private function assertUniqueWorkloadNames(object $project): void
+    {
+        foreach (['queues', 'cron'] as $section) {
+            if (! $this->sectionDeclared($project, $section, $section) || ! method_exists($project, $section)) {
+                continue;
+            }
+            $names = [];
+            foreach ($project->{$section}() as $name => $workload) {
+                if (method_exists($workload, 'enabled') && ! $workload->enabled()) {
+                    continue;
+                }
+                $resolved = $this->slug((string) $name);
+                if (isset($names[$resolved])) {
+                    throw new \InvalidArgumentException('EasyPanel '.$section.' names must remain distinct after normalization and truncation.');
+                }
+                $names[$resolved] = true;
+            }
+        }
     }
 
     private function databaseServiceName(string $name): string
