@@ -376,12 +376,17 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             if ($worker !== null && ($worker['type'] ?? null) !== 'app') {
                 throw new \RuntimeException("EasyPanel worker service {$workerName} is not an app service.");
             }
+            $existingEnvironment = '';
+            if ($worker !== null) {
+                $inspected = $client->inspectAppService($projectName, $workerName);
+                $existingEnvironment = $this->ownedWorkloadEnvironment($inspected, $projectName, 'WORKER', $workerName);
+            }
             if ($worker === null) {
                 $client->createAppService($projectName, $workerName);
             }
 
             $this->configureSource($client, $projectName, $workerName, $source, $profile);
-            $client->updateEnvironment($projectName, $workerName, $this->environment($projectName, $profile, $databaseEnvironment)."\nSHIPPERCLI_MANAGED_WORKER={$workerName}");
+            $client->updateEnvironment($projectName, $workerName, $this->environment($projectName, $profile, $databaseEnvironment, $existingEnvironment)."\nSHIPPERCLI_MANAGED_WORKER={$workerName}");
             $connection = method_exists($queue, 'connection') ? $queue->connection() : 'database';
             $queueName = method_exists($queue, 'queue') ? $queue->queue() : 'default';
             $command = "php artisan queue:work {$connection} --queue={$queueName}";
@@ -426,6 +431,11 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         if ($service !== null && ($service['type'] ?? null) !== 'box') {
             throw new \RuntimeException('EasyPanel scheduler service name is already used by a non-Box service.');
         }
+        $existingEnvironment = '';
+        if ($service !== null) {
+            $inspected = $client->inspectBoxService($projectName, $serviceName);
+            $existingEnvironment = $this->ownedWorkloadEnvironment($inspected, $projectName, 'CRON', $serviceName);
+        }
         if ($service === null) {
             $client->createBoxService($projectName, $serviceName);
         }
@@ -441,7 +451,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         $client->updateBoxEnvironment(
             $projectName,
             $serviceName,
-            $this->environment($projectName, $profile, $databaseEnvironment)."\nSHIPPERCLI_MANAGED_CRON={$serviceName}",
+            $this->environment($projectName, $profile, $databaseEnvironment, $existingEnvironment)."\nSHIPPERCLI_MANAGED_CRON={$serviceName}",
         );
 
         $scripts = [];
@@ -868,6 +878,21 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         $lines[] = 'SHIPPERCLI_PROFILE='.$this->profileName($profile);
 
         return \implode("\n", $lines);
+    }
+
+    /** @param array<string, mixed> $service */
+    private function ownedWorkloadEnvironment(array $service, string $projectName, string $kind, string $name): string
+    {
+        $value = $service['env'] ?? '';
+        if (\is_array($value)) $value = $value['content'] ?? '';
+        $env = \is_string($value) ? $value : '';
+        if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
+            || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)
+            || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_'.$kind.'='.$name)) {
+            throw new \RuntimeException("Refusing to modify EasyPanel workload {$name} without matching Shipper ownership markers.");
+        }
+
+        return $env;
     }
 
     private function hasEnvironmentLine(string $env, string $line): bool
