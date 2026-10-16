@@ -15,6 +15,8 @@ final class OwnershipEnvironmentTest extends TestCase
             ["SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED=0", false],
             ["COMMENT=\"multiline\nSHIPPERCLI_MANAGED=1\ntext\"", false],
             ['SHIPPERCLI_MANAGED="unterminated', false],
+            ["SHIPPERCLI_MANAGED=1\nBROKEN=\"unfinished", false],
+            ["SHIPPERCLI_MANAGED=1\nVALUE=\"valid\nmultiline\"", true],
             ['export SHIPPERCLI_MANAGED = "1" # managed', true],
             ["SHIPPERCLI_MANAGED=0\nSHIPPERCLI_MANAGED=1", true],
         ] as [$environment, $owned]) {

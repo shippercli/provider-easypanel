@@ -1054,7 +1054,11 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
     {
         [$key, $expected] = explode('=', $line, 2);
         try {
-            $values = \Dotenv\Dotenv::parse($env);
+            $probe = '__SHIPPER_ENV_END_'.\bin2hex(\random_bytes(16));
+            $values = \Dotenv\Dotenv::parse($env."\n".$probe."=1\n");
+            if (($values[$probe] ?? null) !== '1') {
+                return false;
+            }
         } catch (\Throwable) {
             return false;
         }

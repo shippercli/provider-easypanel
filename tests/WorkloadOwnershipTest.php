@@ -73,4 +73,22 @@ final class WorkloadOwnershipTest extends TestCase
         }
     }
 
+    public function testCronCleanupRefusesOwnershipFromIncompleteEnvironment(): void
+    {
+        $calls = [];
+        $env = "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=project\nSHIPPERCLI_MANAGED_CRON=scheduler\nBROKEN=\"unfinished";
+        $client = new EasyPanelClient('https://panel.example.test', 'token', transport: static function (string $procedure, array $input) use (&$calls, $env): mixed {
+            $calls[] = $procedure;
+            if ($procedure === 'projects.listProjectsAndServices') return ['projects' => [['name' => 'project']], 'services' => []];
+            return str_ends_with($procedure, 'inspectService') ? ['env' => ['content' => $env]] : null;
+        });
+        $provider = new EasyPanelProvider([], $client);
+        $failure = null;
+        try {
+            (new \ReflectionMethod($provider, 'destroyOwnedCronService'))->invoke($provider, $client, 'project', ['type' => 'box']);
+        } catch (\RuntimeException $exception) { $failure = $exception; }
+        self::assertInstanceOf(\RuntimeException::class, $failure);
+        self::assertSame(['services.box.inspectService'], $calls);
+    }
+
 }
