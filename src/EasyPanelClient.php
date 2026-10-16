@@ -342,6 +342,7 @@ final class EasyPanelClient
         \curl_setopt_array($handle, [
             CURLOPT_POST => true,
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_HTTPHEADER => [
                 'Authorization: '.$this->authToken,
                 'Content-Type: application/json',
@@ -354,11 +355,15 @@ final class EasyPanelClient
 
         $response = \curl_exec($handle);
         $status = (int) \curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
-        $curlError = \curl_error($handle);
+        $curlErrorNumber = \curl_errno($handle);
         unset($handle);
 
         if ($response === false) {
-            throw new \RuntimeException('EasyPanel API transport error: '.$curlError);
+            throw new \RuntimeException('EasyPanel API transport error (cURL '.$curlErrorNumber.').');
+        }
+
+        if ($status < 200 || $status >= 300) {
+            throw new \RuntimeException('EasyPanel API request failed (HTTP '.$status.').');
         }
 
         try {
@@ -369,16 +374,6 @@ final class EasyPanelClient
 
         if (! \is_array($decoded)) {
             throw new \RuntimeException('EasyPanel API returned an invalid response.');
-        }
-
-        if ($status >= 400) {
-            $message = $decoded['json']['message'] ?? ('HTTP '.$status);
-            $validation = $decoded['json']['data']['zodErrors'] ?? null;
-            if ($validation !== null) {
-                $message .= ': '.\json_encode($validation, JSON_UNESCAPED_SLASHES);
-            }
-
-            throw new \RuntimeException('EasyPanel API request failed: '.$message);
         }
 
         if (\array_key_exists('json', $decoded)) {

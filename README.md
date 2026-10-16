@@ -176,3 +176,20 @@ read failures return `blocked: true` with one actionable blocked entry. The core
 CLI enforcement is proposed in shippercli/cli#154. Database and workload
 prerequisites remain subject to validation during apply; an unblocked app plan
 does not prove every deployment prerequisite or live connection is ready.
+
+### HTTP response and diagnostic boundaries
+
+Authenticated EasyPanel requests reject every non-2xx HTTP status before decoding
+the response body. Redirects are not followed; success-shaped JSON on a redirect
+is not accepted as an API result. HTTP failures report their status code without
+including server messages or validation payloads, which may echo submitted
+credentials. Transport failures report a cURL error number without raw URL/error
+text. Use the server's protected diagnostics to investigate detailed validation
+failures; application logs and successful API data are not automatically redacted.
+
+`python3 tests/http/test_responses.py` exercises the real cURL path against a
+loopback server using synthetic credentials. It covers 301/302/303/307/308,
+400/401/403/404/422/429/500/502, JSON/text error bodies, successful direct/nested
+responses, and malformed-URL diagnostics. The pre-fix code accepted a 301 with
+success-shaped JSON and leaked synthetic credentials echoed in a 400 response.
+The check runs in PHP matrix CI. It does not prove live EasyPanel compatibility.

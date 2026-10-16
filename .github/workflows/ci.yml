@@ -34,3 +34,5 @@ jobs:
         run: composer test
       - name: Audit dependencies
         run: composer audit --locked --no-interaction
+      - name: Verify real HTTP response boundaries
+        run: python3 tests/http/test_responses.py
