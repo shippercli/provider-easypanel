@@ -156,7 +156,7 @@ foreach (['absent', 'retain-project', 'other-service', 'pending-app', 'pending-p
 echo "Six public-provider cleanup HTTP flows passed\n";
 
 foreach (['worker', 'scheduler', 'database'] as $kind) {
-    foreach (['absent', 'visible', 'replaced', 'unreadable'] as $state) {
+    foreach (['absent', 'visible', 'replaced', 'unreadable', 'malformed'] as $state) {
         $name = ['worker' => 'worker-default', 'scheduler' => 'scheduler', 'database' => 'db-fixture'][$kind];
         $type = ['worker' => 'app', 'scheduler' => 'box', 'database' => 'mysql'][$kind];
         $service = ['projectName' => 'fixture', 'name' => $name, 'type' => $type];
@@ -171,10 +171,11 @@ foreach (['worker', 'scheduler', 'database'] as $kind) {
                 'database' => (new ReflectionMethod($provider, 'reconcileDatabases'))->invoke($provider, $api, new stdClass, 'fixture', $inventory),
             };
         } catch (RuntimeException $exception) { $failure = $exception; }
-        if (($state === 'absent') !== ($failure === null)) throw new RuntimeException('Unconfirmed workload deletion accepted: '.$kind.'/'.$state);
+        $expectedSuccess = $state === 'absent' || ($state === 'malformed' && $kind !== 'scheduler');
+        if ($expectedSuccess !== ($failure === null)) throw new RuntimeException('Unconfirmed workload deletion accepted: '.$kind.'/'.$state);
     }
 }
-echo "12 real HTTP worker/scheduler/database deletion verification flows passed\n";
+echo "15 real HTTP worker/scheduler/database deletion verification flows passed\n";
 
 
 $passwordApi = new EasyPanelClient($argv[1].'/database-password', 'synthetic-authorization-secret');

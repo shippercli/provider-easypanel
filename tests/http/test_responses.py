@@ -36,6 +36,7 @@ class ResponsesTest(unittest.TestCase):
                     types = {'worker': 'app', 'scheduler': 'box', 'database': 'mysql'}
                     if procedure.endswith('.inspectService'):
                         data = {'env': 'SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=fixture\nSHIPPERCLI_MANAGED_WORKER=worker-default\nSHIPPERCLI_MANAGED_CRON=scheduler'}
+                        if state == 'malformed': data['env'] += '\nBROKEN="unfinished'
                     elif procedure.endswith('.destroyService'): data = None
                     elif state == 'unreadable': data = None
                     else:
@@ -149,7 +150,11 @@ class ResponsesTest(unittest.TestCase):
                 result = subprocess.run(['php', str(Path(__file__).with_name('verify-responses.php')), f'http://127.0.0.1:{server.server_port}'], capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(redirected, [])
-                self.assertEqual(len(received), 241)
+                for kind in ['worker', 'scheduler', 'database']:
+                    procedures = [path.rsplit('/', 1)[-1] for path, _, _ in received if path.startswith('/workload-delete/' + kind + '/malformed/')]
+                    self.assertEqual(len(procedures), 1)
+                    self.assertTrue(procedures[0].endswith('.inspectService'))
+                self.assertEqual(len(received), 244)
                 self.assertTrue(all(auth == 'synthetic-authorization-secret' for _, auth, _ in received))
                 self.assertEqual(sum(b'synthetic-body-secret' in body for _, _, body in received), 26)
                 for case in ['absent', 'retain-project', 'other-service', 'pending-app', 'pending-project', 'unreadable']:
