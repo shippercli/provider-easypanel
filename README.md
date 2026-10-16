@@ -233,3 +233,12 @@ transports still return decoded payloads under their existing contract.
 An acknowledgement does not prove provisioning, runtime health or deletion.
 Rejected mutation responses can follow a remote side effect; inspect the account
 before retrying. Live API compatibility and workflow completion remain unverified.
+
+Service inspections reject null/scalar/list payloads instead of converting them
+to empty details. Domain inventories require a list of object records with
+nonempty trimmed host strings; malformed data cannot become an empty list that
+invites duplicate creation. Empty domain lists remain valid, and multiple paths
+on one host are preserved. Raw HTTP object/array distinctions are checked before
+normalization. These are shape checks: ownership markers, expected identities,
+requested configuration, runtime state and live compatibility require separate
+verification.

@@ -79,3 +79,27 @@ foreach (['direct', 'nested'] as $format) {
     }
 }
 echo "13 invalid mutation envelopes, two explicit null controls and eight raw inventory shape rejections passed\n";
+
+foreach (['direct', 'nested'] as $format) {
+    foreach (['app', 'box', 'mysql', 'domains'] as $kind) {
+        $cases = $kind === 'domains' ? ['null', 'object', 'string', 'array-record', 'missing-host', 'padded-host', 'empty', 'valid'] : ['null', 'list', 'string', 'valid'];
+        foreach ($cases as $case) {
+            $api = new EasyPanelClient($argv[1].'/read/'.$kind.'/'.$case.'/'.$format, 'synthetic-authorization-secret');
+            $failure = null;
+            try {
+                $result = match ($kind) {
+                    'app' => $api->inspectAppService('fixture', 'app'),
+                    'box' => $api->inspectBoxService('fixture', 'worker'),
+                    'mysql' => $api->inspectDatabaseService('mysql', 'fixture', 'db'),
+                    'domains' => $api->listDomains('fixture', 'app'),
+                };
+            } catch (Throwable $exception) { $failure = $exception; }
+            if (in_array($case, ['valid', 'empty'], true)) {
+                if ($failure !== null || ($case === 'empty' && $result !== [])) throw new RuntimeException('Valid read changed');
+            } elseif (!$failure instanceof RuntimeException || str_contains($failure->getMessage(), 'synthetic-secret')) {
+                throw new RuntimeException('Malformed read normalized as valid: '.$kind.'/'.$case);
+            }
+        }
+    }
+}
+echo "40 real HTTP service/domain read shape checks passed\n";

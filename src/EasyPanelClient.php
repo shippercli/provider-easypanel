@@ -141,7 +141,7 @@ final class EasyPanelClient
             'serviceName' => $serviceName,
         ]);
 
-        return is_array($data) ? $data : [];
+        return $this->inspectionData($data);
     }
 
     public function destroyBoxService(string $projectName, string $serviceName): void
@@ -172,7 +172,7 @@ final class EasyPanelClient
             'serviceName' => $serviceName,
         ]);
 
-        return is_array($data) ? $data : [];
+        return $this->inspectionData($data);
     }
 
     public function destroyDatabaseService(string $type, string $projectName, string $serviceName): void
@@ -192,7 +192,7 @@ final class EasyPanelClient
             'serviceName' => $serviceName,
         ]);
 
-        return \is_array($data) ? $data : [];
+        return $this->inspectionData($data);
     }
 
     public function updateImageSource(string $projectName, string $serviceName, string $image): void
@@ -259,7 +259,16 @@ final class EasyPanelClient
             'serviceName' => $serviceName,
         ]);
 
-        return \is_array($data) ? \array_values($data) : [];
+        if (! \is_array($data) || ! \array_is_list($data)) {
+            throw new \RuntimeException('EasyPanel returned an invalid domain inventory.');
+        }
+        foreach ($data as $domain) {
+            if (! \is_array($domain) || ! \is_string($domain['host'] ?? null) || $domain['host'] === ''
+                || \trim($domain['host']) !== $domain['host']) {
+                throw new \RuntimeException('EasyPanel returned an invalid domain inventory.');
+            }
+        }
+        return $data;
     }
 
     public function createDomain(
@@ -379,6 +388,15 @@ final class EasyPanelClient
         return $this->decodeResponse($response, $procedure);
     }
 
+    /** @return array<string, mixed> */
+    private function inspectionData(mixed $data): array
+    {
+        if (! \is_array($data) || ($data !== [] && \array_is_list($data))) {
+            throw new \RuntimeException('EasyPanel returned an invalid service inspection.');
+        }
+        return $data;
+    }
+
     private function decodeResponse(string $response, string $procedure): mixed
     {
         try {
@@ -418,6 +436,20 @@ final class EasyPanelClient
                     throw new \RuntimeException('EasyPanel returned an invalid project/service inventory.');
                 }
             }
+        }
+        if ($procedure === 'domains.listDomains') {
+            if (! \is_array($payload)) {
+                throw new \RuntimeException('EasyPanel returned an invalid domain inventory.');
+            }
+            foreach ($payload as $entry) {
+                if (! $entry instanceof \stdClass) {
+                    throw new \RuntimeException('EasyPanel returned an invalid domain inventory.');
+                }
+            }
+        }
+        if (\preg_match('/^services\.(app|box|mysql|mariadb|postgres|mongo|redis)\.inspectService$/D', $procedure) === 1
+            && ! $payload instanceof \stdClass) {
+            throw new \RuntimeException('EasyPanel returned an invalid service inspection.');
         }
         return \json_decode(\json_encode($payload, JSON_THROW_ON_ERROR), true, 512, JSON_THROW_ON_ERROR);
     }
