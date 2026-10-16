@@ -28,6 +28,7 @@ final class DatabaseEnvironmentTest extends TestCase
         $calls = [];
         $client = new EasyPanelClient('https://panel.example.test', 'token', transport: static function (string $procedure, array $input) use (&$calls): array {
             if (str_ends_with($procedure, 'createService')) $calls[] = $input;
+            if ($procedure === 'projects.listProjectsAndServices') return ['projects' => [], 'services' => []];
             return [];
         });
         $provider = new EasyPanelProvider(['database_environment_prefixes' => ['main' => 'DB', 'analytics' => 'ANALYTICS_DB']], $client);

@@ -36,9 +36,26 @@ final class EasyPanelClient
     {
         $data = $this->call('projects.listProjectsAndServices');
 
+        if (! \is_array($data) || ! \is_array($data['projects'] ?? null) || ! \array_is_list($data['projects'])
+            || ! \is_array($data['services'] ?? null) || ! \array_is_list($data['services'])) {
+            throw new \RuntimeException('EasyPanel returned an invalid project/service inventory.');
+        }
+        foreach ($data['projects'] as $project) {
+            if (! \is_array($project) || ! \is_string($project['name'] ?? null) || $project['name'] === '') {
+                throw new \RuntimeException('EasyPanel returned an invalid project inventory entry.');
+            }
+        }
+        foreach ($data['services'] as $service) {
+            foreach (['projectName', 'name', 'type'] as $key) {
+                if (! \is_array($service) || ! \is_string($service[$key] ?? null) || $service[$key] === '') {
+                    throw new \RuntimeException('EasyPanel returned an invalid service inventory entry.');
+                }
+            }
+        }
+
         return [
-            'projects' => \is_array($data) && \is_array($data['projects'] ?? null) ? \array_values($data['projects']) : [],
-            'services' => \is_array($data) && \is_array($data['services'] ?? null) ? \array_values($data['services']) : [],
+            'projects' => $data['projects'],
+            'services' => $data['services'],
         ];
     }
 
