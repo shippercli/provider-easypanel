@@ -40,3 +40,5 @@ jobs:
         run: python3 tests/http/test_responses.py
       - name: Verify application environment readback over HTTP
         run: python3 tests/http/test_environment_readback.py
+      - name: Verify worker and scheduler environment readback over HTTP
+        run: python3 tests/http/test_workload_readback.py

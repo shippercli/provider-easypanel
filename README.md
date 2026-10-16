@@ -340,5 +340,7 @@ and deployment operations. Worker and scheduler environment writes also require 
 all expected variables before worker deployment settings/triggers or scheduler
 scripts are updated. Box scheduler inspection supports both a plain environment
 string and its nested `env.content` representation. Unit transport tests cover
-saved, ignored and malformed writes for both workload types; dedicated real HTTP
-workload-readback scenarios remain to be added.
+saved, ignored, malformed, missing, wrong-type and lost-value responses for both
+workload types. Real cURL HTTP coverage also checks scheduler responses with plain
+string and nested `env.content` shapes. Failed readback stops workload deployment
+or scheduler script/restart calls.
