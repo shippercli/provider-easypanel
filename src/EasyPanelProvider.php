@@ -319,6 +319,14 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                 if (($service['type'] ?? null) !== $type) {
                     throw new \RuntimeException("EasyPanel database service {$serviceName} already exists with a different type.");
                 }
+                $inspected = $client->inspectDatabaseService($type, $projectName, $serviceName);
+                $value = $inspected['env'] ?? '';
+                if (\is_array($value)) $value = $value['content'] ?? '';
+                $env = \is_string($value) ? $value : '';
+                if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
+                    || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
+                    throw new \RuntimeException("Refusing to reuse EasyPanel database {$serviceName} without matching Shipper ownership markers.");
+                }
                 continue;
             }
 
@@ -544,12 +552,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             throw new \RuntimeException('Refusing to destroy a non-Box EasyPanel scheduler service.');
         }
         $inspected = $client->inspectBoxService($projectName, 'scheduler');
-        $env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
-        if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
-            || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)
-            || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_CRON=scheduler')) {
-            throw new \RuntimeException('Refusing to destroy an unowned EasyPanel scheduler service.');
-        }
+        $this->ownedWorkloadEnvironment($inspected, $projectName, 'CRON', 'scheduler');
         $client->destroyBoxService($projectName, 'scheduler');
     }
 

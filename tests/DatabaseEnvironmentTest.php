@@ -55,4 +55,25 @@ final class DatabaseEnvironmentTest extends TestCase
             }
         }
     }
+    public function testAnExistingUnmanagedDatabaseIsNotReused(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient('https://panel.example.test', 'token', transport: static function (string $procedure, array $input) use (&$calls): mixed {
+            $calls[] = $procedure;
+            return match ($procedure) {
+                'projects.listProjectsAndServices' => ['projects' => [['name' => 'owned-project']], 'services' => [['projectName' => 'owned-project', 'name' => 'db-main', 'type' => 'mysql']]],
+                'services.mysql.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=someone-else"],
+                default => throw new \LogicException('Unexpected mutation: '.$procedure),
+            };
+        });
+        $provider = new EasyPanelProvider(['database_environment_prefixes' => ['main' => 'DB', 'analytics' => 'ANALYTICS_DB']], $client);
+        try {
+            (new \ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, $this->project(), 'owned-project');
+            self::fail('An unmanaged database must not be reused.');
+        } catch (\RuntimeException $exception) {
+            self::assertStringContainsString('ownership markers', $exception->getMessage());
+            self::assertSame(['projects.listProjectsAndServices', 'services.mysql.inspectService'], $calls);
+        }
+    }
+
 }

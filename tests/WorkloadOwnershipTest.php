@@ -45,4 +45,27 @@ final class WorkloadOwnershipTest extends TestCase
             }
         }
     }
+    public function testSchedulerCleanupAcceptsNestedOwnedEnvironmentAndRejectsOtherScopes(): void
+    {
+        foreach ([true, false] as $owned) {
+            $calls = [];
+            $project = $owned ? 'project' : 'another-project';
+            $env = "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT={$project}\nSHIPPERCLI_MANAGED_CRON=scheduler";
+            $client = new EasyPanelClient('https://panel.example.test', 'token', transport: static function (string $procedure, array $input) use (&$calls, $env): mixed {
+                $calls[] = $procedure;
+                return str_ends_with($procedure, 'inspectService') ? ['env' => ['content' => $env]] : null;
+            });
+            $provider = new EasyPanelProvider([], $client);
+            try {
+                (new \ReflectionMethod($provider, 'destroyOwnedCronService'))->invoke($provider, $client, 'project', ['type' => 'box']);
+                self::assertTrue($owned);
+                self::assertSame(['services.box.inspectService', 'services.box.destroyService'], $calls);
+            } catch (\RuntimeException $exception) {
+                self::assertFalse($owned);
+                self::assertStringContainsString('ownership markers', $exception->getMessage());
+                self::assertSame(['services.box.inspectService'], $calls);
+            }
+        }
+    }
+
 }
