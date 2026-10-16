@@ -55,6 +55,11 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
     public function validate(object $project, object $profile): array
     {
         $errors = $this->validateConnectionConfig();
+        try {
+            $this->databaseEnvironmentPrefixes($project);
+        } catch (\InvalidArgumentException $exception) {
+            $errors[] = $exception->getMessage();
+        }
         $source = $this->source($project, $profile);
 
         if ($source === null) {
@@ -301,6 +306,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         $databases = $this->sectionDeclared($project, 'databases', 'databases') && method_exists($project, 'databases')
             ? $project->databases()
             : [];
+        $prefixes = $this->databaseEnvironmentPrefixes($project);
         foreach ($databases as $database) {
             if (! method_exists($database, 'name')) {
                 continue;
@@ -328,14 +334,13 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             ];
             $client->createDatabaseService($type, $projectName, $serviceName, $payload);
 
-            if ($environment === []) {
-                $environment = [
-                    'DB_HOST' => $serviceName,
-                    'DB_DATABASE' => $databaseName,
-                    'DB_USERNAME' => $username,
-                    'DB_PASSWORD' => $password,
-                ];
-            }
+            $prefix = $prefixes[$database->name()];
+            $environment = [...$environment,
+                $prefix.'_HOST' => $serviceName,
+                $prefix.'_DATABASE' => $databaseName,
+                $prefix.'_USERNAME' => $username,
+                $prefix.'_PASSWORD' => $password,
+            ];
         }
 
         if ($this->booleanConfig('reconcile_databases', false)) {
@@ -583,6 +588,34 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
     private function databaseServiceName(string $name): string
     {
         return 'db-'.$this->slug($name);
+    }
+
+    /** @return array<string, string> */
+    private function databaseEnvironmentPrefixes(object $project): array
+    {
+        $databases = $this->sectionDeclared($project, 'databases', 'databases') && method_exists($project, 'databases')
+            ? $project->databases() : [];
+        $configured = $this->config['database_environment_prefixes'] ?? [];
+        if (! \is_array($configured)) {
+            throw new \InvalidArgumentException('EasyPanel database_environment_prefixes must be a map of database names to environment prefixes.');
+        }
+        $prefixes = [];
+        foreach ($databases as $database) {
+            if (! \is_object($database) || ! \method_exists($database, 'name')) {
+                throw new \InvalidArgumentException('EasyPanel database declarations require a name.');
+            }
+            $name = $database->name();
+            $prefix = $configured[$name] ?? (\count($databases) === 1 ? 'DB' : null);
+            if (! \is_string($prefix) || \preg_match('/\A[A-Z_][A-Z0-9_]*\z/', $prefix) !== 1) {
+                throw new \InvalidArgumentException("EasyPanel database {$name} requires a valid database_environment_prefixes entry when multiple databases are declared.");
+            }
+            if (isset($prefixes[$name]) || \in_array($prefix, $prefixes, true)) {
+                throw new \InvalidArgumentException('EasyPanel database names and environment prefixes must be unique.');
+            }
+            $prefixes[$name] = $prefix;
+        }
+
+        return $prefixes;
     }
 
     private function databaseType(object $database): string

@@ -26,6 +26,30 @@ Not yet supported by the provider:
 
 EasyPanel may provide those capabilities in its UI, but this package does not claim support until their API behavior and cleanup semantics have dedicated tests.
 
+## Database connection variables
+
+A single newly created database supplies `DB_HOST`, `DB_DATABASE`, `DB_USERNAME`,
+and `DB_PASSWORD` to the application. Multiple database declarations require an
+explicit unique prefix for every database name in the provider configuration:
+
+```yaml
+providers:
+  easypanel:
+    database_environment_prefixes:
+      main: DB
+      analytics: ANALYTICS_DB
+```
+
+The `analytics` database then supplies `ANALYTICS_DB_HOST`,
+`ANALYTICS_DB_DATABASE`, `ANALYTICS_DB_USERNAME`, and `ANALYTICS_DB_PASSWORD`.
+Configure the application to read these variables. Prefixes must be uppercase
+environment identifiers and cannot be shared by databases. Passwords are
+generated independently unless a shared `database_password` is explicitly set.
+Re-apply preserves the existing application environment and does not rotate
+passwords for existing database services. An existing service's credentials
+must already be configured in the application; the provider cannot recover a
+previously discarded password.
+
 ## Install
 
 ```bash
