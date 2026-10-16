@@ -44,3 +44,17 @@ if ($failure === null || !str_contains($failure->getMessage(), 'transport error 
     throw new RuntimeException('Transport diagnostics were not safe and actionable');
 }
 echo "26 non-success status checks and two successful response controls passed\n";
+
+foreach (['direct', 'nested'] as $format) {
+    foreach (['duplicate-project', 'padded-project', 'duplicate-service', 'conflicting-type', 'orphan', 'padded-service', 'padded-parent', 'padded-type', 'valid'] as $case) {
+        $api = new EasyPanelClient($argv[1].'/inventory/'.$case.'/'.$format, 'synthetic-authorization-secret');
+        $failure = null;
+        try { $inventory = $api->listProjectsAndServices(); } catch (RuntimeException $exception) { $failure = $exception; }
+        if ($case === 'valid') {
+            if ($failure !== null || count($inventory['projects']) !== 2 || count($inventory['services']) !== 2) {
+                throw new RuntimeException('Valid scoped inventory rejected');
+            }
+        } elseif ($failure === null) throw new RuntimeException('Ambiguous EasyPanel inventory accepted: '.$case);
+    }
+}
+echo "16 real HTTP inventory rejections and two scoped-name controls passed\n";

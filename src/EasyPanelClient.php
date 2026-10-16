@@ -40,17 +40,27 @@ final class EasyPanelClient
             || ! \is_array($data['services'] ?? null) || ! \array_is_list($data['services'])) {
             throw new \RuntimeException('EasyPanel returned an invalid project/service inventory.');
         }
+        $projects = [];
+        $services = [];
         foreach ($data['projects'] as $project) {
-            if (! \is_array($project) || ! \is_string($project['name'] ?? null) || $project['name'] === '') {
+            if (! \is_array($project) || ! \is_string($project['name'] ?? null) || $project['name'] === ''
+                || \trim($project['name']) !== $project['name'] || isset($projects[$project['name']])) {
                 throw new \RuntimeException('EasyPanel returned an invalid project inventory entry.');
             }
+            $projects[$project['name']] = true;
         }
         foreach ($data['services'] as $service) {
             foreach (['projectName', 'name', 'type'] as $key) {
-                if (! \is_array($service) || ! \is_string($service[$key] ?? null) || $service[$key] === '') {
+                if (! \is_array($service) || ! \is_string($service[$key] ?? null) || $service[$key] === ''
+                    || \trim($service[$key]) !== $service[$key]) {
                     throw new \RuntimeException('EasyPanel returned an invalid service inventory entry.');
                 }
             }
+            $identity = \json_encode([$service['projectName'], $service['name']], JSON_THROW_ON_ERROR);
+            if (! isset($projects[$service['projectName']]) || isset($services[$identity])) {
+                throw new \RuntimeException('EasyPanel returned an ambiguous or inconsistent service inventory.');
+            }
+            $services[$identity] = true;
         }
 
         return [

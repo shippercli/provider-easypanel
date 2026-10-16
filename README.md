@@ -206,3 +206,15 @@ class map. Dependency classes come from the installed checkout; this check does
 not perform a fresh production dependency install or live deployment. CI runs it
 with the existing provider tests. Git export verification uses current worktree
 attributes; committed attributes determine subsequent GitHub source archives.
+
+### Inventory identity validation
+
+Project/service discovery rejects duplicate project names, repeated service
+names within a project (even with different service types), and services whose
+parent project is absent from the returned project list. Project names, service
+names, parent names and types must be nonempty trimmed strings. A service name
+can still occur in different projects. The full inventory is validated before
+it is returned, so matching an early entry cannot hide a later ambiguity. These
+checks do not establish a snapshot, independent ownership, or concurrency locks.
+The HTTP fixture exercises direct and nested API envelopes with synthetic data;
+live EasyPanel compatibility remains unverified.

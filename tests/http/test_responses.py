@@ -20,7 +20,25 @@ class ResponsesTest(unittest.TestCase):
                 body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
                 received.append((self.path, self.headers.get('Authorization'), body))
                 procedure = self.path.rsplit('/', 1)[-1]
-                if procedure.startswith('status-'):
+                if self.path.startswith('/inventory/'):
+                    case, format_ = self.path.split('/')[2:4]
+                    project = {'name': 'fixture'}
+                    service = {'projectName': 'fixture', 'name': 'app', 'type': 'app'}
+                    data = {'projects': [project], 'services': [service]}
+                    if case == 'duplicate-project': data['projects'].append(project.copy())
+                    elif case == 'padded-project': project['name'] = ' fixture'
+                    elif case == 'duplicate-service': data['services'].append(service.copy())
+                    elif case == 'conflicting-type': data['services'].append(dict(service, type='mysql'))
+                    elif case == 'orphan': data['projects'] = []
+                    elif case == 'padded-service': service['name'] = ' app'
+                    elif case == 'padded-parent': service['projectName'] = 'fixture '
+                    elif case == 'padded-type': service['type'] = 'app '
+                    elif case == 'valid':
+                        data['projects'].append({'name': 'second'})
+                        data['services'].append(dict(service, projectName='second'))
+                    envelope = {'json': data} if format_ == 'direct' else {'result': {'data': {'json': data}}}
+                    status, payload = 200, json.dumps(envelope).encode()
+                elif procedure.startswith('status-'):
                     _, status, format_ = procedure.split('-')
                     status = int(status)
                     echoed = self.headers.get('Authorization', '') + body.decode() + 'synthetic-error-secret'
@@ -47,7 +65,7 @@ class ResponsesTest(unittest.TestCase):
                 result = subprocess.run(['php', str(Path(__file__).with_name('verify-responses.php')), f'http://127.0.0.1:{server.server_port}'], capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(redirected, [])
-                self.assertEqual(len(received), 28)
+                self.assertEqual(len(received), 46)
                 self.assertTrue(all(auth == 'synthetic-authorization-secret' for _, auth, _ in received))
                 self.assertEqual(sum(b'synthetic-body-secret' in body for _, _, body in received), 26)
             finally:
