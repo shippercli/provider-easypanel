@@ -98,6 +98,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             try {
                 $client = $this->getClient();
                 $inventory = $client->listProjectsAndServices();
+                $existingEnvironment = '';
                 if ($this->projectExists($inventory, $this->legacyManagedProjectName($project, $profile))) {
                     $blocked = 'A legacy EasyPanel project requires explicit ownership review and migration.';
                 } else {
@@ -111,8 +112,16 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                             if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
                                 || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
                                 $blocked = 'Existing EasyPanel service lacks matching project/profile ownership markers.';
+                            } else {
+                                $existingEnvironment = $env;
                             }
                         }
+                    }
+                    if ($blocked === null) {
+                        $applicationEnvironment = $this->environment($projectName, $profile, [], $existingEnvironment, $project);
+                        $blocked = $this->planDatabaseAndWorkloadPrerequisites(
+                            $client, $project, $projectName, $inventory, $applicationEnvironment,
+                        );
                     }
                 }
             } catch (\Throwable) {
@@ -148,6 +157,85 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                 ? 'Database and workload prerequisites are rechecked during apply.'
                 : 'No deployment actions are authorized by this plan.',
         ];
+    }
+
+    /** @param array{projects: array<int, array<string, mixed>>, services: array<int, array<string, mixed>>} $inventory */
+    private function planDatabaseAndWorkloadPrerequisites(
+        EasyPanelClient $client,
+        object $project,
+        string $projectName,
+        array $inventory,
+        string $applicationEnvironment,
+    ): ?string {
+        $prefixes = $this->databaseEnvironmentPrefixes($project);
+        $available = $this->databaseApplicationEnvironment($project, $applicationEnvironment);
+        $databases = $this->sectionDeclared($project, 'databases', 'databases') && method_exists($project, 'databases')
+            ? $project->databases() : [];
+        foreach ($databases as $database) {
+            $type = $this->databaseType($database);
+            $serviceName = $this->databaseServiceName($database->name());
+            $service = $this->findService($inventory, $projectName, $serviceName);
+            if ($service === null) {
+                continue;
+            }
+            if (($service['type'] ?? null) !== $type) {
+                return "EasyPanel database service {$serviceName} already exists with a different type.";
+            }
+            $details = $client->inspectDatabaseService($type, $projectName, $serviceName);
+            $env = is_string($details['env'] ?? null) ? $details['env'] : '';
+            if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
+                || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
+                return "Existing EasyPanel database {$serviceName} lacks matching project ownership markers.";
+            }
+            $prefix = $prefixes[$database->name()];
+            $databaseName = $this->databaseIdentifier($database->name());
+            $username = method_exists($database, 'user') ? $this->databaseIdentifier($database->user()) : 'shipper';
+            if (($available[$prefix.'_DATABASE'] ?? null) !== $databaseName
+                || ($available[$prefix.'_USERNAME'] ?? null) !== $username
+                || ! is_string($available[$prefix.'_HOST'] ?? null) || $available[$prefix.'_HOST'] === ''
+                || ! is_string($available[$prefix.'_PASSWORD'] ?? null) || $available[$prefix.'_PASSWORD'] === '') {
+                return "Existing EasyPanel database {$serviceName} requires matching {$prefix} connection settings and a password in the application environment.";
+            }
+        }
+
+        $queues = $this->sectionDeclared($project, 'queues', 'queues') && method_exists($project, 'queues')
+            ? $project->queues() : [];
+        foreach ($queues as $name => $queue) {
+            if (method_exists($queue, 'enabled') && ! $queue->enabled()) {
+                continue;
+            }
+            $workerName = 'worker-'.$this->slug((string) $name);
+            $service = $this->findService($inventory, $projectName, $workerName);
+            if ($service === null) {
+                continue;
+            }
+            if (($service['type'] ?? null) !== 'app') {
+                return "EasyPanel worker service {$workerName} is not an app service.";
+            }
+            $details = $client->inspectAppService($projectName, $workerName);
+            try {
+                $this->ownedWorkloadEnvironment($details, $projectName, 'WORKER', $workerName);
+            } catch (\RuntimeException) {
+                return "Existing EasyPanel worker {$workerName} lacks matching project ownership markers.";
+            }
+        }
+
+        $crons = $this->sectionDeclared($project, 'cron', 'cron') && method_exists($project, 'cron')
+            ? $project->cron() : [];
+        $scheduler = $this->findService($inventory, $projectName, 'scheduler');
+        if ($scheduler !== null && $crons !== []) {
+            if (($scheduler['type'] ?? null) !== 'box') {
+                return 'EasyPanel scheduler service name is already used by a non-Box service.';
+            }
+            $details = $client->inspectBoxService($projectName, 'scheduler');
+            try {
+                $this->ownedWorkloadEnvironment($details, $projectName, 'CRON', 'scheduler');
+            } catch (\RuntimeException) {
+                return 'Existing EasyPanel scheduler lacks matching project ownership markers.';
+            }
+        }
+
+        return null;
     }
 
     public function apply(object $project, object $profile): bool
