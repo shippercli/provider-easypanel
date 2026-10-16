@@ -57,6 +57,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         $errors = $this->validateConnectionConfig();
         try {
             $this->databaseEnvironmentPrefixes($project);
+            $this->environment('validation', $profile, [], '', $project);
         } catch (\InvalidArgumentException $exception) {
             $errors[] = $exception->getMessage();
         }
@@ -156,12 +157,12 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                 $client->createAppService($projectName, $serviceName);
             }
 
-            $databaseEnvironment = $this->applyDatabases($client, $project, $projectName, $this->environment($projectName, $profile, [], $existingEnvironment));
+            $databaseEnvironment = $this->applyDatabases($client, $project, $projectName, $this->environment($projectName, $profile, [], $existingEnvironment, $project));
 
             $source = $this->source($project, $profile);
             \assert($source !== null);
             $this->configureSource($client, $projectName, $serviceName, $source, $profile);
-            $client->updateEnvironment($projectName, $serviceName, $this->environment($projectName, $profile, $databaseEnvironment, $existingEnvironment));
+            $client->updateEnvironment($projectName, $serviceName, $this->environment($projectName, $profile, $databaseEnvironment, $existingEnvironment, $project));
             $this->applyWorkers($client, $project, $profile, $projectName, $source, $databaseEnvironment);
             $this->applyCron($client, $project, $profile, $projectName, $source, $databaseEnvironment);
 
@@ -406,7 +407,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             }
 
             $this->configureSource($client, $projectName, $workerName, $source, $profile);
-            $client->updateEnvironment($projectName, $workerName, $this->environment($projectName, $profile, $databaseEnvironment, $existingEnvironment)."\nSHIPPERCLI_MANAGED_WORKER={$workerName}");
+            $client->updateEnvironment($projectName, $workerName, $this->environment($projectName, $profile, $databaseEnvironment, $existingEnvironment, $project)."\nSHIPPERCLI_MANAGED_WORKER={$workerName}");
             $connection = method_exists($queue, 'connection') ? $queue->connection() : 'database';
             $queueName = method_exists($queue, 'queue') ? $queue->queue() : 'default';
             $command = "php artisan queue:work {$connection} --queue={$queueName}";
@@ -471,7 +472,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         $client->updateBoxEnvironment(
             $projectName,
             $serviceName,
-            $this->environment($projectName, $profile, $databaseEnvironment, $existingEnvironment)."\nSHIPPERCLI_MANAGED_CRON={$serviceName}",
+            $this->environment($projectName, $profile, $databaseEnvironment, $existingEnvironment, $project)."\nSHIPPERCLI_MANAGED_CRON={$serviceName}",
         );
 
         $scripts = [];
@@ -869,23 +870,23 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
     }
 
     /** @param array<string, string> $additional */
-    private function environment(string $projectName, object $profile, array $additional = [], string $existing = ''): string
+    private function environment(string $projectName, object $profile, array $additional = [], string $existing = '', ?object $project = null): string
     {
         $lines = $existing === '' ? [] : [$existing];
-        foreach ([$this->config['env'] ?? null, $this->profileValue($profile, 'env'), $this->profileValue($profile, 'environment')] as $value) {
+        foreach ([$this->config['env'] ?? null, $this->canonicalEnvironment($project), $this->profileValue($profile, 'env'), $this->profileValue($profile, 'environment'), $this->canonicalEnvironment($profile)] as $value) {
             if (\is_string($value) && \trim($value) !== '') {
                 $lines[] = \trim($value);
             } elseif (\is_array($value)) {
                 foreach ($value as $key => $item) {
                     if (\is_string($key) && (\is_scalar($item) || $item === null)) {
-                        $lines[] = $key.'='.(string) $item;
+                        $lines[] = $this->environmentLine($key, (string) $item);
                     }
                 }
             }
         }
 
         foreach ($additional as $key => $value) {
-            $lines[] = $key.'='.$value;
+            $lines[] = $this->environmentLine($key, $value);
         }
 
         $lines[] = self::MANAGED_MARKER;
@@ -893,6 +894,27 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         $lines[] = 'SHIPPERCLI_PROFILE='.$this->profileName($profile);
 
         return \implode("\n", $lines);
+    }
+
+    /** @return array<string, mixed> */
+    private function canonicalEnvironment(?object $source): array
+    {
+        $environment = $source !== null && \method_exists($source, 'environment') ? $source->environment() : null;
+        $variables = \is_object($environment) && \method_exists($environment, 'variables') ? $environment->variables() : [];
+
+        return \is_array($variables) ? $variables : [];
+    }
+
+    private function environmentLine(string $key, string $value): string
+    {
+        if (\preg_match('/\A[A-Za-z_][A-Za-z0-9_]*\z/', $key) !== 1) {
+            throw new \InvalidArgumentException('EasyPanel environment variable names must be valid identifiers.');
+        }
+        if ($value === '' || \preg_match('/[\s#=\\\\"\x27$]/', $value) === 1) {
+            $value = '"'.\str_replace(['\\', '"', '$', "\r", "\n"], ['\\\\', '\\"', '\\$', '\\r', '\\n'], $value).'"';
+        }
+
+        return $key.'='.$value;
     }
 
     /** @param array<string, mixed> $service */
