@@ -285,3 +285,14 @@ no cron jobs are declared, because scheduler reconciliation inspects that name.
 Active queue names and cron script names must also remain distinct after
 lowercasing, punctuation normalization and truncation to 48 characters.
 Configuration validation rejects these conflicts before deployment API calls.
+
+### Mixed-case database identifiers
+
+Database names and usernames are lowercased before unsupported characters are
+replaced with underscores. For example, `Main_DB` becomes `main_db` and `AppUser`
+becomes `appuser`. Earlier code replaced uppercase letters instead, producing
+`ain` and `pp_ser`. Existing services retain the same normalized service name;
+reapply refuses mismatching application credentials rather than renaming or
+recreating the database. Review actual database/user names before upgrading an
+existing mixed-case declaration. Preserve its data and credentials and plan an
+explicit migration; changing a declaration can change the targeted service.

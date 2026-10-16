@@ -114,4 +114,54 @@ final class DatabaseEnvironmentTest extends TestCase
         }
     }
 
+    public function testMixedCaseIdentifiersPreserveLettersInPayloadAndApplicationEnvironment(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient('https://panel.example.test', 'token', transport: static function (string $procedure, array $input) use (&$calls): array {
+            if (str_ends_with($procedure, 'createService')) $calls[] = $input;
+            return $procedure === 'projects.listProjectsAndServices' ? ['projects' => [], 'services' => []] : [];
+        });
+        $project = new class {
+            public function databases(): array { return [new class {
+                public function name(): string { return 'Main_DB'; }
+                public function user(): string { return 'AppUser'; }
+            }]; }
+        };
+        $provider = new EasyPanelProvider([], $client);
+        $environment = (new \ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, $project, 'owned-project');
+        self::assertCount(1, $calls);
+        self::assertSame('main_db', $calls[0]['databaseName']);
+        self::assertSame('appuser', $calls[0]['user']);
+        self::assertSame('main_db', $environment['DB_DATABASE']);
+        self::assertSame('appuser', $environment['DB_USERNAME']);
+        self::assertSame('db-main-db', $environment['DB_HOST']);
+    }
+    public function testLegacyMixedCaseCredentialsAreNotSilentlyRenamedOrRecreated(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient('https://panel.example.test', 'token', transport: static function (string $procedure, array $input) use (&$calls): array {
+            $calls[] = $procedure;
+            return match ($procedure) {
+                'projects.listProjectsAndServices' => ['projects' => [['name' => 'owned-project']], 'services' => [
+                    ['projectName' => 'owned-project', 'name' => 'db-main-db', 'type' => 'mysql']]],
+                'services.mysql.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=owned-project"],
+                default => throw new \LogicException('Unexpected mutation'),
+            };
+        });
+        $project = new class {
+            public function databases(): array { return [new class {
+                public function name(): string { return 'Main_DB'; }
+                public function user(): string { return 'AppUser'; }
+            }]; }
+        };
+        $provider = new EasyPanelProvider([], $client);
+        $failure = null;
+        try {
+            (new \ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, $project, 'owned-project',
+                "DB_HOST=db-main-db\nDB_DATABASE=ain\nDB_USERNAME=pp_ser\nDB_PASSWORD=synthetic-secret");
+        } catch (\RuntimeException $error) { $failure = $error; }
+        self::assertNotNull($failure);
+        self::assertStringContainsString('requires matching DB connection settings', $failure->getMessage());
+        self::assertSame(['projects.listProjectsAndServices', 'services.mysql.inspectService'], $calls);
+    }
 }

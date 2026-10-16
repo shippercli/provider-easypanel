@@ -1178,7 +1178,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
 
     private function databaseIdentifier(string $value): string
     {
-        $identifier = strtolower((string) preg_replace('/[^a-z0-9_]+/', '_', $value));
+        $identifier = (string) preg_replace('/[^a-z0-9_]+/', '_', strtolower($value));
         $identifier = trim($identifier, '_');
         if ($identifier === '' || ! preg_match('/^[a-z]/', $identifier)) {
             $identifier = 'db_'.$identifier;
