@@ -183,9 +183,11 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             }
             $details = $client->inspectDatabaseService($type, $projectName, $serviceName);
             $env = is_string($details['env'] ?? null) ? $details['env'] : '';
-            if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
-                || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
-                return "Existing EasyPanel database {$serviceName} lacks matching project ownership markers.";
+            // EasyPanel exposes no database environment update operation. A marker
+            // supplied at create time cannot distinguish resources after creation
+            // unless it matches the exact declaration scope and is a created marker.
+            if (! $this->databaseCreatedMarkerMatches($env, $projectName, $serviceName)) {
+                return "Existing EasyPanel database {$serviceName} lacks a matching Shipper-created ownership marker; this EasyPanel API cannot safely adopt it.";
             }
             $prefix = $prefixes[$database->name()];
             $databaseName = $this->databaseIdentifier($database->name());
@@ -539,9 +541,8 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                 $value = $inspected['env'] ?? '';
                 if (\is_array($value)) $value = $value['content'] ?? '';
                 $env = \is_string($value) ? $value : '';
-                if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
-                    || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
-                    throw new \RuntimeException("Refusing to reuse EasyPanel database {$serviceName} without matching Shipper ownership markers.");
+                if (! $this->databaseCreatedMarkerMatches($env, $projectName, $serviceName)) {
+                    throw new \RuntimeException("Refusing to reuse EasyPanel database {$serviceName} without a matching Shipper-created ownership marker. This EasyPanel API cannot safely adopt existing databases.");
                 }
                 $prefix = $prefixes[$database->name()];
                 if (($available[$prefix.'_DATABASE'] ?? null) !== $databaseName
@@ -560,7 +561,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                 'user' => $username,
                 'password' => $password,
                 'rootPassword' => (string) ($this->config['database_root_password'] ?? bin2hex(random_bytes(20))),
-                'env' => self::MANAGED_MARKER."\nSHIPPERCLI_MANAGED_PROJECT={$projectName}",
+                'env' => self::MANAGED_MARKER."\nSHIPPERCLI_MANAGED_PROJECT={$projectName}\nSHIPPERCLI_DATABASE_CREATED=".$this->databaseScopeHash($projectName, $serviceName),
             ];
             $client->createDatabaseService($type, $projectName, $serviceName, $payload);
 
@@ -804,8 +805,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             }
             $inspected = $client->inspectDatabaseService($type, $projectName, $serviceName);
             $env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
-            if ($this->hasEnvironmentLine($env, self::MANAGED_MARKER)
-                && $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
+            if ($this->databaseCreatedMarkerMatches($env, $projectName, $serviceName)) {
                 $client->destroyDatabaseService($type, $projectName, $serviceName);
                 $this->assertServiceAbsent($client, $projectName, $serviceName);
             }
@@ -823,6 +823,18 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
     private function isDatabaseType(string $type): bool
     {
         return in_array($type, ['mysql', 'mariadb', 'postgres', 'mongo', 'redis'], true);
+    }
+
+    private function databaseCreatedMarkerMatches(string $environment, string $projectName, string $serviceName): bool
+    {
+        return $this->hasEnvironmentLine($environment, self::MANAGED_MARKER)
+            && $this->hasEnvironmentLine($environment, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)
+            && $this->hasEnvironmentLine($environment, 'SHIPPERCLI_DATABASE_CREATED='.$this->databaseScopeHash($projectName, $serviceName));
+    }
+
+    private function databaseScopeHash(string $projectName, string $serviceName): string
+    {
+        return substr(hash('sha256', json_encode([$projectName, $serviceName], JSON_THROW_ON_ERROR)), 0, 24);
     }
 
     private function sectionDeclared(object $project, string $section, string $method): bool

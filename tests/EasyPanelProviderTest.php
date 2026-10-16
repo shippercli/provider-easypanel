@@ -249,7 +249,7 @@ final class EasyPanelProviderTest extends TestCase
                         ...($removed ? [] : [['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'db-old', 'type' => 'postgres']]),
                     ],
                 ],
-                'services.postgres.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028"],
+                'services.postgres.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028\nSHIPPERCLI_DATABASE_CREATED=".substr(hash('sha256', json_encode(['shippercli-demo-provider-v1-811454f76c57a1580028', 'db-old'], JSON_THROW_ON_ERROR)), 0, 24)],
                 'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028"],
                 'domains.listDomains' => [],
                 default => null,
@@ -330,7 +330,7 @@ final class EasyPanelProviderTest extends TestCase
                         ],
                     ],
                     'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028\nDB_HOST=db-main\nDB_DATABASE=main\nDB_USERNAME=shipper\nDB_PASSWORD=retained-secret"],
-                    'services.postgres.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028"],
+                    'services.postgres.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028\nSHIPPERCLI_DATABASE_CREATED=".substr(hash('sha256', json_encode(['shippercli-demo-provider-v1-811454f76c57a1580028', 'db-main'], JSON_THROW_ON_ERROR)), 0, 24)],
                     'domains.listDomains' => [],
                     default => null,
                 };

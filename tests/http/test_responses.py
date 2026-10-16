@@ -47,6 +47,7 @@ class ResponsesTest(unittest.TestCase):
                     types = {'worker': 'app', 'scheduler': 'box', 'database': 'mysql'}
                     if procedure.endswith('.inspectService'):
                         data = {'env': 'SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=fixture\nSHIPPERCLI_MANAGED_WORKER=worker-default\nSHIPPERCLI_MANAGED_CRON=scheduler'}
+                        if kind == 'database': data['env'] += '\nSHIPPERCLI_DATABASE_CREATED=24278f6ee6dcd2d8144ee46f'
                         if state == 'malformed': data['env'] += '\nBROKEN="unfinished'
                     elif procedure.endswith('.destroyService'): data = None
                     elif state == 'unreadable': data = None

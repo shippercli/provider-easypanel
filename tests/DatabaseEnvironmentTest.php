@@ -56,7 +56,7 @@ final class DatabaseEnvironmentTest extends TestCase
             }
         }
     }
-    public function testAnExistingUnmanagedDatabaseIsNotReused(): void
+    public function testAnExistingDatabaseWithoutExactCreationMarkerIsNotReused(): void
     {
         $calls = [];
         $client = new EasyPanelClient('https://panel.example.test', 'token', transport: static function (string $procedure, array $input) use (&$calls): mixed {
@@ -73,7 +73,7 @@ final class DatabaseEnvironmentTest extends TestCase
             (new \ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, $this->project(), 'owned-project');
         } catch (\RuntimeException $exception) { $failure = $exception; }
         self::assertNotNull($failure, 'An unmanaged database must not be reused.');
-        self::assertStringContainsString('ownership markers', $failure->getMessage());
+        self::assertStringContainsString('cannot safely adopt', $failure->getMessage());
         self::assertSame(['projects.listProjectsAndServices', 'services.mysql.inspectService'], $calls);
     }
 
@@ -90,7 +90,7 @@ final class DatabaseEnvironmentTest extends TestCase
                 $calls[] = $procedure;
                 return match ($procedure) {
                     'projects.listProjectsAndServices' => ['projects' => [['name' => 'owned-project']], 'services' => [['projectName' => 'owned-project', 'name' => 'db-main', 'type' => 'mysql']]],
-                    'services.mysql.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=owned-project"],
+                    'services.mysql.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=owned-project\nSHIPPERCLI_DATABASE_CREATED=".substr(hash('sha256', json_encode(['owned-project', 'db-main'], JSON_THROW_ON_ERROR)), 0, 24)],
                     default => throw new \LogicException('Unexpected mutation: '.$procedure),
                 };
             });
@@ -144,7 +144,7 @@ final class DatabaseEnvironmentTest extends TestCase
             return match ($procedure) {
                 'projects.listProjectsAndServices' => ['projects' => [['name' => 'owned-project']], 'services' => [
                     ['projectName' => 'owned-project', 'name' => 'db-main-db', 'type' => 'mysql']]],
-                'services.mysql.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=owned-project"],
+                'services.mysql.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=owned-project\nSHIPPERCLI_DATABASE_CREATED=".substr(hash('sha256', json_encode(['owned-project', 'db-main-db'], JSON_THROW_ON_ERROR)), 0, 24)],
                 default => throw new \LogicException('Unexpected mutation'),
             };
         });

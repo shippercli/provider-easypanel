@@ -61,6 +61,12 @@ nonempty password before deployment. Malformed or incomplete environment content
 fails without rotating the database password. The provider cannot recover a
 previously discarded password.
 
+Database ownership is recorded in the database service environment at creation.
+Reuse and reconciliation require the marker to match the exact EasyPanel project
+and service. The EasyPanel API client used here has no database environment
+update operation, so it cannot safely adopt an existing database; unmarked or
+legacy databases are blocked from reuse and preserved during cleanup.
+
 ## Install
 
 ```bash
@@ -142,12 +148,17 @@ source:
 
 ## Cleanup safety
 
-`shipper destroy` refuses to delete a service unless all of these conditions hold:
+`shipper destroy` refuses to delete the app service unless all of these conditions hold:
 
 - The project name is derived from the configured `managed_prefix`, project, and profile.
 - The exact service name matches the provider configuration.
 - The service is an app service.
-- The service environment contains both Shipper ownership markers.
+- The app service environment contains both Shipper ownership markers.
+
+Database reconciliation only deletes a database carrying its exact Shipper-created
+marker for the configured project and service. It preserves unmarked and legacy
+databases. The current EasyPanel API client has no database environment update
+operation, so existing databases cannot be adopted safely.
 
 After deleting the marked service, the provider deletes its project only when `destroy_project` is enabled and no services remain. Set `destroy_project: false` to retain empty managed projects. The core orphan-preview flow enumerates marked app services through their configured domains and routes deletion through the same ownership checks.
 
