@@ -196,15 +196,17 @@ final class EasyPanelProviderTest extends TestCase
     public function test_apply_removes_an_owned_worker_removed_from_configuration(): void
     {
         $calls = [];
-        $client = new EasyPanelClient('https://panel.example.com', 'token', transport: static function (string $procedure, array $input) use (&$calls): mixed {
+        $removed = false;
+        $client = new EasyPanelClient('https://panel.example.com', 'token', transport: static function (string $procedure, array $input) use (&$calls, &$removed): mixed {
             $calls[] = [$procedure, $input];
+            if ($procedure === 'services.app.destroyService') $removed = true;
 
             return match ($procedure) {
                 'projects.listProjectsAndServices' => [
                     'projects' => [['name' => 'shippercli-demo-provider-v1-811454f76c57a1580028']],
                     'services' => [
                         ['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'web', 'type' => 'app'],
-                        ['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'worker-old', 'type' => 'app'],
+                        ...($removed ? [] : [['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'worker-old', 'type' => 'app']]),
                     ],
                 ],
                 'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028\nSHIPPERCLI_MANAGED_WORKER=worker-old"],
@@ -213,7 +215,9 @@ final class EasyPanelProviderTest extends TestCase
             };
         });
         $project = new class {
-            public function name(): string { return 'provider'; }
+
+
+    public function name(): string { return 'provider'; }
             public function repository(): array { return []; }
             public function hasSection(string $section): bool { return $section === 'queues'; }
             public function queues(): array { return []; }
@@ -226,15 +230,17 @@ final class EasyPanelProviderTest extends TestCase
     public function test_apply_can_reconcile_an_owned_database_when_explicitly_enabled(): void
     {
         $calls = [];
-        $client = new EasyPanelClient('https://panel.example.com', 'token', transport: static function (string $procedure, array $input) use (&$calls): mixed {
+        $removed = false;
+        $client = new EasyPanelClient('https://panel.example.com', 'token', transport: static function (string $procedure, array $input) use (&$calls, &$removed): mixed {
             $calls[] = [$procedure, $input];
+            if ($procedure === 'services.postgres.destroyService') $removed = true;
 
             return match ($procedure) {
                 'projects.listProjectsAndServices' => [
                     'projects' => [['name' => 'shippercli-demo-provider-v1-811454f76c57a1580028']],
                     'services' => [
                         ['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'web', 'type' => 'app'],
-                        ['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'db-old', 'type' => 'postgres'],
+                        ...($removed ? [] : [['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'db-old', 'type' => 'postgres']]),
                     ],
                 ],
                 'services.postgres.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028"],
@@ -244,7 +250,9 @@ final class EasyPanelProviderTest extends TestCase
             };
         });
         $project = new class {
-            public function name(): string { return 'provider'; }
+
+
+    public function name(): string { return 'provider'; }
             public function repository(): array { return []; }
             public function hasSection(string $section): bool { return $section === 'databases'; }
             public function databases(): array { return []; }

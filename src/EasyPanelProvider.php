@@ -601,6 +601,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                 && $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)
                 && $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_WORKER='.$workerName)) {
                 $client->destroyAppService($projectName, $workerName);
+                $this->assertServiceAbsent($client, $projectName, $workerName);
             }
         }
     }
@@ -614,6 +615,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         $inspected = $client->inspectBoxService($projectName, 'scheduler');
         $this->ownedWorkloadEnvironment($inspected, $projectName, 'CRON', 'scheduler');
         $client->destroyBoxService($projectName, 'scheduler');
+        $this->assertServiceAbsent($client, $projectName, 'scheduler');
     }
 
     /** @param array{projects: array<int, array<string, mixed>>, services: array<int, array<string, mixed>>} $inventory */
@@ -640,7 +642,16 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             if ($this->hasEnvironmentLine($env, self::MANAGED_MARKER)
                 && $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
                 $client->destroyDatabaseService($type, $projectName, $serviceName);
+                $this->assertServiceAbsent($client, $projectName, $serviceName);
             }
+        }
+    }
+
+    private function assertServiceAbsent(EasyPanelClient $client, string $projectName, string $serviceName): void
+    {
+        $remaining = $client->listProjectsAndServices();
+        if ($this->findService($remaining, $projectName, $serviceName) !== null) {
+            throw new \RuntimeException('EasyPanel service deletion remains unconfirmed; the target is still visible. Recheck before retrying.');
         }
     }
 

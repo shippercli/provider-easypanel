@@ -154,3 +154,24 @@ foreach (['absent', 'retain-project', 'other-service', 'pending-app', 'pending-p
     if ($provider->destroy($cleanupProject, $cleanupProfile) !== $expected) throw new RuntimeException('Invalid public cleanup verification: '.$case);
 }
 echo "Six public-provider cleanup HTTP flows passed\n";
+
+foreach (['worker', 'scheduler', 'database'] as $kind) {
+    foreach (['absent', 'visible', 'replaced', 'unreadable'] as $state) {
+        $name = ['worker' => 'worker-default', 'scheduler' => 'scheduler', 'database' => 'db-fixture'][$kind];
+        $type = ['worker' => 'app', 'scheduler' => 'box', 'database' => 'mysql'][$kind];
+        $service = ['projectName' => 'fixture', 'name' => $name, 'type' => $type];
+        $inventory = ['projects' => [['name' => 'fixture']], 'services' => [$service]];
+        $api = new EasyPanelClient($argv[1].'/workload-delete/'.$kind.'/'.$state, 'synthetic-authorization-secret');
+        $provider = new \ShipperCli\ProviderEasyPanel\EasyPanelProvider([], $api);
+        $failure = null;
+        try {
+            match ($kind) {
+                'worker' => (new ReflectionMethod($provider, 'reconcileWorkers'))->invoke($provider, $api, $inventory, 'fixture', []),
+                'scheduler' => (new ReflectionMethod($provider, 'destroyOwnedCronService'))->invoke($provider, $api, 'fixture', $service),
+                'database' => (new ReflectionMethod($provider, 'reconcileDatabases'))->invoke($provider, $api, new stdClass, 'fixture', $inventory),
+            };
+        } catch (RuntimeException $exception) { $failure = $exception; }
+        if (($state === 'absent') !== ($failure === null)) throw new RuntimeException('Unconfirmed workload deletion accepted: '.$kind.'/'.$state);
+    }
+}
+echo "12 real HTTP worker/scheduler/database deletion verification flows passed\n";

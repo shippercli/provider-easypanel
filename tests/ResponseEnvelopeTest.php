@@ -27,13 +27,13 @@ final class ResponseEnvelopeTest extends TestCase
     public function testInvalidEnvelopesFailSafely(string $body): void
     {
         $client = new EasyPanelClient('https://example.test', 'synthetic');
+        $failure = null;
         try {
             (new \ReflectionMethod($client, 'decodeResponse'))->invoke($client, $body, 'fixture');
-            self::fail('Invalid response was accepted');
-        } catch (\RuntimeException $exception) {
-            self::assertStringNotContainsString('synthetic-secret', $exception->getMessage());
-            self::assertNull($exception->getPrevious());
-        }
+        } catch (\Throwable $exception) { $failure = $exception; }
+        self::assertInstanceOf(\RuntimeException::class, $failure);
+        self::assertStringNotContainsString('synthetic-secret', $failure->getMessage());
+        self::assertNull($failure->getPrevious());
     }
 
     public function testValidNullMutationPayloadsAreExplicit(): void

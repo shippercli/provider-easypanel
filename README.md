@@ -266,3 +266,12 @@ and sends no repeated delete; asynchronous work may return an unconfirmed result
 requiring a status check before retry. This proves observed API inventory
 absence, not physical erasure, worker/database completion, or transactional
 cleanup. Live account verification remains required.
+
+Owned worker, Box scheduler and database deletion now each require a fresh
+validated inventory showing the project/service name absent before reconciliation
+or cleanup continues. A replacement under the same name, even with a different
+type, is not treated as absence. Unreadable or still-visible results stop the
+operation with an unconfirmed result. Verification performs one read and no
+repeat delete; asynchronous completion may require a later status check. This
+adds observation-time completion checks and does not provide shared locking,
+physical erasure guarantees or transactional cleanup.
