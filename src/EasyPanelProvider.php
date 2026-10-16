@@ -133,6 +133,11 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             $client = $this->getClient();
             $inventory = $client->listProjectsAndServices();
 
+            $legacyName = $this->legacyManagedProjectName($project, $profile);
+            if ($this->projectExists($inventory, $legacyName)) {
+                throw new \RuntimeException('Refusing to apply while a legacy EasyPanel project exists under the ambiguous name. Review its exact project/profile ownership and migrate it explicitly.');
+            }
+
             if (! $this->projectExists($inventory, $projectName)) {
                 $client->createProject($projectName);
             }
@@ -211,6 +216,9 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             $client = $this->getClient();
             $inventory = $client->listProjectsAndServices();
             if (! $this->projectExists($inventory, $projectName)) {
+                if ($this->projectExists($inventory, $this->legacyManagedProjectName($project, $profile))) {
+                    throw new \RuntimeException('Refusing to destroy a legacy EasyPanel project without unambiguous project/profile scope. Review and migrate it explicitly.');
+                }
                 return true;
             }
 
@@ -995,6 +1003,13 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
     }
 
     private function managedProjectName(object $project, object $profile): string
+    {
+        $scope = json_encode([$this->projectName($project), $this->profileName($profile)], JSON_THROW_ON_ERROR);
+
+        return $this->legacyManagedProjectName($project, $profile).'-'.substr(hash('sha256', $scope), 0, 20);
+    }
+
+    private function legacyManagedProjectName(object $project, object $profile): string
     {
         return $this->managedPrefix().$this->slugify($this->projectName($project)).'-'.$this->slugify($this->profileName($profile));
     }

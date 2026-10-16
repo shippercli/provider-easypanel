@@ -45,15 +45,15 @@ final class EasyPanelProviderTest extends TestCase
 
                 return match ($procedure) {
                     'projects.listProjectsAndServices' => [
-                        'projects' => [['name' => 'shippercli-demo-provider-preview']],
+                        'projects' => [['name' => 'shippercli-demo-provider-preview-b7806089dcff5c6cd25c']],
                         'services' => [[
-                            'projectName' => 'shippercli-demo-provider-preview',
+                            'projectName' => 'shippercli-demo-provider-preview-b7806089dcff5c6cd25c',
                             'name' => 'web',
                             'type' => 'app',
                         ]],
                     ],
                     'services.app.inspectService' => [
-                        'env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-preview",
+                        'env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-preview-b7806089dcff5c6cd25c",
                     ],
                     'domains.listDomains' => [['host' => 'preview.example.com']],
                     default => [],
@@ -95,7 +95,7 @@ final class EasyPanelProviderTest extends TestCase
             $provider->logs($this->project(), $this->profile(), 25),
         );
         self::assertSame('logs.queryServiceLogs', $calls[0][0]);
-        self::assertSame('shippercli-demo-provider-v1', $calls[0][1]['projectName']);
+        self::assertSame('shippercli-demo-provider-v1-811454f76c57a1580028', $calls[0][1]['projectName']);
         self::assertSame('web', $calls[0][1]['serviceName']);
         self::assertSame(25, $calls[0][1]['limit']);
     }
@@ -124,9 +124,9 @@ final class EasyPanelProviderTest extends TestCase
 
                 return match ($procedure) {
                     'projects.listProjectsAndServices' => [
-                        'projects' => [['name' => 'shippercli-demo-provider-v1']],
+                        'projects' => [['name' => 'shippercli-demo-provider-v1-811454f76c57a1580028']],
                         'services' => [[
-                            'projectName' => 'shippercli-demo-provider-v1',
+                            'projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028',
                             'name' => 'web',
                             'type' => 'app',
                         ]],
@@ -144,7 +144,7 @@ final class EasyPanelProviderTest extends TestCase
         self::assertSame([
             'provider' => 'easypanel',
             'state' => 'running',
-            'project' => 'shippercli-demo-provider-v1',
+            'project' => 'shippercli-demo-provider-v1-811454f76c57a1580028',
             'service' => 'web',
             'service_state' => [
                 'status' => 'running',
@@ -186,10 +186,10 @@ final class EasyPanelProviderTest extends TestCase
             'domains.createDomain',
             'services.app.deployService',
         ], \array_column($calls, 0));
-        self::assertSame('shippercli-demo-provider-v1', $calls[1][1]['name']);
-        self::assertSame('shippercli-demo-provider-v1', $calls[2][1]['projectName']);
+        self::assertSame('shippercli-demo-provider-v1-811454f76c57a1580028', $calls[1][1]['name']);
+        self::assertSame('shippercli-demo-provider-v1-811454f76c57a1580028', $calls[2][1]['projectName']);
         self::assertStringContainsString('SHIPPERCLI_MANAGED=1', $calls[4][1]['env']);
-        self::assertStringContainsString('SHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1', $calls[4][1]['env']);
+        self::assertStringContainsString('SHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028', $calls[4][1]['env']);
         self::assertSame('demo.shippercli.com', $calls[8][1]['host']);
     }
 
@@ -201,13 +201,13 @@ final class EasyPanelProviderTest extends TestCase
 
             return match ($procedure) {
                 'projects.listProjectsAndServices' => [
-                    'projects' => [['name' => 'shippercli-demo-provider-v1']],
+                    'projects' => [['name' => 'shippercli-demo-provider-v1-811454f76c57a1580028']],
                     'services' => [
-                        ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'web', 'type' => 'app'],
-                        ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'worker-old', 'type' => 'app'],
+                        ['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'web', 'type' => 'app'],
+                        ['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'worker-old', 'type' => 'app'],
                     ],
                 ],
-                'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1\nSHIPPERCLI_MANAGED_WORKER=worker-old"],
+                'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028\nSHIPPERCLI_MANAGED_WORKER=worker-old"],
                 'domains.listDomains' => [],
                 default => null,
             };
@@ -231,14 +231,14 @@ final class EasyPanelProviderTest extends TestCase
 
             return match ($procedure) {
                 'projects.listProjectsAndServices' => [
-                    'projects' => [['name' => 'shippercli-demo-provider-v1']],
+                    'projects' => [['name' => 'shippercli-demo-provider-v1-811454f76c57a1580028']],
                     'services' => [
-                        ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'web', 'type' => 'app'],
-                        ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'db-old', 'type' => 'postgres'],
+                        ['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'web', 'type' => 'app'],
+                        ['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'db-old', 'type' => 'postgres'],
                     ],
                 ],
-                'services.postgres.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1"],
-                'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1"],
+                'services.postgres.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028"],
+                'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028"],
                 'domains.listDomains' => [],
                 default => null,
             };
@@ -303,14 +303,14 @@ final class EasyPanelProviderTest extends TestCase
 
                 return match ($procedure) {
                     'projects.listProjectsAndServices' => [
-                        'projects' => [['name' => 'shippercli-demo-provider-v1']],
+                        'projects' => [['name' => 'shippercli-demo-provider-v1-811454f76c57a1580028']],
                         'services' => [
-                            ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'web', 'type' => 'app'],
-                            ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'db-main', 'type' => 'postgres'],
+                            ['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'web', 'type' => 'app'],
+                            ['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'db-main', 'type' => 'postgres'],
                         ],
                     ],
-                    'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1\nDB_HOST=db-main\nDB_DATABASE=main\nDB_USERNAME=shipper\nDB_PASSWORD=retained-secret"],
-                    'services.postgres.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1"],
+                    'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028\nDB_HOST=db-main\nDB_DATABASE=main\nDB_USERNAME=shipper\nDB_PASSWORD=retained-secret"],
+                    'services.postgres.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028"],
                     'domains.listDomains' => [],
                     default => null,
                 };
@@ -386,9 +386,9 @@ final class EasyPanelProviderTest extends TestCase
 
                 return match ($procedure) {
                     'projects.listProjectsAndServices' => [
-                        'projects' => [['name' => 'shippercli-demo-provider-v1']],
+                        'projects' => [['name' => 'shippercli-demo-provider-v1-811454f76c57a1580028']],
                         'services' => [[
-                            'projectName' => 'shippercli-demo-provider-v1',
+                            'projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028',
                             'name' => 'web',
                             'type' => 'app',
                         ]],
@@ -416,9 +416,9 @@ final class EasyPanelProviderTest extends TestCase
 
                 return match ($procedure) {
                     'projects.listProjectsAndServices' => [
-                        'projects' => [['name' => 'shippercli-demo-provider-v1']],
+                        'projects' => [['name' => 'shippercli-demo-provider-v1-811454f76c57a1580028']],
                         'services' => [[
-                            'projectName' => 'shippercli-demo-provider-v1',
+                            'projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028',
                             'name' => 'web',
                             'type' => 'app',
                         ]],
@@ -449,9 +449,9 @@ final class EasyPanelProviderTest extends TestCase
                     $listCount++;
 
                     return [
-                        'projects' => [['name' => 'shippercli-demo-provider-v1']],
+                        'projects' => [['name' => 'shippercli-demo-provider-v1-811454f76c57a1580028']],
                         'services' => $listCount === 1 ? [[
-                            'projectName' => 'shippercli-demo-provider-v1',
+                            'projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028',
                             'name' => 'web',
                             'type' => 'app',
                         ]] : [],
@@ -459,7 +459,7 @@ final class EasyPanelProviderTest extends TestCase
                 }
 
                 if ($procedure === 'services.app.inspectService') {
-                    return ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1"];
+                    return ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028"];
                 }
 
                 return null;

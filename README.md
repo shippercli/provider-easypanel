@@ -143,6 +143,22 @@ source:
 
 After deleting the marked service, the provider deletes its project only when `destroy_project` is enabled and no services remain. Set `destroy_project: false` to retain empty managed projects. The core orphan-preview flow enumerates marked app services through their configured domains and routes deletion through the same ownership checks.
 
+## Project ownership scope
+
+Managed project names append the first 20 hexadecimal characters of the SHA-256
+hash of the JSON-encoded `[project-name, profile-name]` pair (PHP `json_encode`
+with `JSON_THROW_ON_ERROR`). This distinguishes names that normalize to the same
+slug or have ambiguous hyphen boundaries. Ownership markers use the complete
+scoped project name.
+
+Legacy names without this suffix require manual review and migration. Apply
+refuses to create a replacement while the legacy project exists. Destroy refuses
+a legacy target when no scoped project exists; preview listing excludes legacy
+targets. Verify the exact project/profile, services, secrets, and database
+associations before renaming the project and updating ownership markers on all
+app, database, worker, and scheduler services. Shipper does not automatically
+adopt or migrate legacy projects.
+
 ## Development
 
 ```bash
