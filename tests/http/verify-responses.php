@@ -58,3 +58,24 @@ foreach (['direct', 'nested'] as $format) {
     }
 }
 echo "16 real HTTP inventory rejections and two scoped-name controls passed\n";
+
+foreach (['missing', 'array', 'null', 'number', 'string', 'error', 'direct-error', 'errors', 'false', 'data-string', 'nested-error', 'ambiguous', 'syntax', 'valid-direct', 'valid-nested'] as $case) {
+    $api = new EasyPanelClient($argv[1].'/envelope/'.$case, 'synthetic-authorization-secret');
+    $failure = null;
+    try { $api->createProject('fixture'); } catch (Throwable $exception) { $failure = $exception; }
+    if (str_starts_with($case, 'valid-')) {
+        if ($failure !== null) throw new RuntimeException('Valid explicit null mutation rejected');
+    } elseif (!$failure instanceof RuntimeException || $failure->getPrevious() !== null
+        || str_contains($failure->getMessage(), 'synthetic-authorization-secret')) {
+        throw new RuntimeException('Invalid mutation envelope accepted or exposed: '.$case);
+    }
+}
+foreach (['direct', 'nested'] as $format) {
+    foreach (['projects-object', 'services-object', 'numeric-object', 'array-record'] as $case) {
+        $api = new EasyPanelClient($argv[1].'/raw-inventory/'.$case.'/'.$format, 'synthetic-authorization-secret');
+        $failure = null;
+        try { $api->listProjectsAndServices(); } catch (RuntimeException $exception) { $failure = $exception; }
+        if ($failure === null) throw new RuntimeException('Raw inventory shape lost: '.$case);
+    }
+}
+echo "13 invalid mutation envelopes, two explicit null controls and eight raw inventory shape rejections passed\n";

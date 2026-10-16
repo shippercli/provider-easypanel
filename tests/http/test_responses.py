@@ -20,7 +20,26 @@ class ResponsesTest(unittest.TestCase):
                 body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
                 received.append((self.path, self.headers.get('Authorization'), body))
                 procedure = self.path.rsplit('/', 1)[-1]
-                if self.path.startswith('/inventory/'):
+                if self.path.startswith('/envelope/'):
+                    case = self.path.split('/')[2]
+                    secret = self.headers.get('Authorization', '')
+                    shapes = {'missing': {}, 'array': [], 'null': None, 'number': 42, 'string': secret,
+                        'error': {'error': {'json': {'message': secret}}}, 'direct-error': {'json': None, 'error': {'message': secret}},
+                        'errors': {'json': None, 'errors': [secret]}, 'false': {'json': None, 'success': False},
+                        'data-string': {'result': {'data': secret}}, 'nested-error': {'result': {'data': {'json': None}, 'error': secret}},
+                        'ambiguous': {'json': None, 'result': {'data': {'json': None}}},
+                        'valid-direct': {'json': None}, 'valid-nested': {'result': {'data': {'json': None}}}}
+                    status, payload = 200, b'{"json":' if case == 'syntax' else json.dumps(shapes[case]).encode()
+                elif self.path.startswith('/raw-inventory/'):
+                    case, format_ = self.path.split('/')[2:4]
+                    data = {'projects': [], 'services': []}
+                    if case == 'projects-object': data['projects'] = {}
+                    elif case == 'services-object': data['services'] = {}
+                    elif case == 'numeric-object': data['projects'] = {'0': {'name': 'fixture'}}
+                    elif case == 'array-record': data['projects'] = [[]]
+                    envelope = {'json': data} if format_ == 'direct' else {'result': {'data': {'json': data}}}
+                    status, payload = 200, json.dumps(envelope).encode()
+                elif self.path.startswith('/inventory/'):
                     case, format_ = self.path.split('/')[2:4]
                     project = {'name': 'fixture'}
                     service = {'projectName': 'fixture', 'name': 'app', 'type': 'app'}
@@ -65,7 +84,7 @@ class ResponsesTest(unittest.TestCase):
                 result = subprocess.run(['php', str(Path(__file__).with_name('verify-responses.php')), f'http://127.0.0.1:{server.server_port}'], capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(redirected, [])
-                self.assertEqual(len(received), 46)
+                self.assertEqual(len(received), 69)
                 self.assertTrue(all(auth == 'synthetic-authorization-secret' for _, auth, _ in received))
                 self.assertEqual(sum(b'synthetic-body-secret' in body for _, _, body in received), 26)
             finally:

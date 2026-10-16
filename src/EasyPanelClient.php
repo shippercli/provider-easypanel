@@ -376,25 +376,50 @@ final class EasyPanelClient
             throw new \RuntimeException('EasyPanel API request failed (HTTP '.$status.').');
         }
 
-        try {
-            $decoded = \json_decode($response, true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException $exception) {
-            throw new \RuntimeException('EasyPanel API returned invalid JSON.', 0, $exception);
-        }
+        return $this->decodeResponse($response, $procedure);
+    }
 
-        if (! \is_array($decoded)) {
+    private function decodeResponse(string $response, string $procedure): mixed
+    {
+        try {
+            $shape = \json_decode($response, false, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            throw new \RuntimeException('EasyPanel API returned invalid JSON.');
+        }
+        if (! $shape instanceof \stdClass) {
             throw new \RuntimeException('EasyPanel API returned an invalid response.');
         }
-
-        if (\array_key_exists('json', $decoded)) {
-            return $decoded['json'];
+        $result = $shape->result ?? null;
+        foreach ([$shape, $result] as $envelope) {
+            if (! $envelope instanceof \stdClass) continue;
+            foreach (['error', 'errors'] as $key) {
+                if (\property_exists($envelope, $key) && ! \in_array($envelope->{$key}, [null, '', [], false], true)) {
+                    throw new \RuntimeException('EasyPanel API reported failure.');
+                }
+            }
+            if (\property_exists($envelope, 'success') && $envelope->success !== true) {
+                throw new \RuntimeException('EasyPanel API reported failure.');
+            }
         }
-
-        if (\array_key_exists('json', $decoded['result']['data'] ?? [])) {
-            return $decoded['result']['data']['json'];
+        $direct = \property_exists($shape, 'json');
+        $data = $result instanceof \stdClass ? ($result->data ?? null) : null;
+        $nested = $data instanceof \stdClass && \property_exists($data, 'json');
+        if ($direct === $nested) {
+            throw new \RuntimeException('EasyPanel API returned an invalid response.');
         }
-
-        return null;
+        $payload = $direct ? $shape->json : $data->json;
+        if ($procedure === 'projects.listProjectsAndServices') {
+            if (! $payload instanceof \stdClass || ! \is_array($payload->projects ?? null)
+                || ! \is_array($payload->services ?? null)) {
+                throw new \RuntimeException('EasyPanel returned an invalid project/service inventory.');
+            }
+            foreach ([...$payload->projects, ...$payload->services] as $entry) {
+                if (! $entry instanceof \stdClass) {
+                    throw new \RuntimeException('EasyPanel returned an invalid project/service inventory.');
+                }
+            }
+        }
+        return \json_decode(\json_encode($payload, JSON_THROW_ON_ERROR), true, 512, JSON_THROW_ON_ERROR);
     }
 
     private function databaseType(string $type): string

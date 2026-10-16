@@ -218,3 +218,18 @@ it is returned, so matching an early entry cannot hide a later ambiguity. These
 checks do not establish a snapshot, independent ownership, or concurrency locks.
 The HTTP fixture exercises direct and nested API envelopes with synthetic data;
 live EasyPanel compatibility remains unverified.
+
+### Response envelope validation
+
+Successful HTTP status is insufficient: the decoder requires exactly one direct
+`json` or nested `result.data.json` success payload and rejects explicit envelope
+errors, unsuccessful flags, missing envelopes and ambiguous dual envelopes.
+Explicit null payloads remain supported for mutation acknowledgements. Invalid
+JSON and API failures use fixed messages with no chained payload exception.
+For project/service inventories, raw JSON collections must be arrays and entries
+objects before associative decoding can erase that distinction. Custom test
+transports still return decoded payloads under their existing contract.
+
+An acknowledgement does not prove provisioning, runtime health or deletion.
+Rejected mutation responses can follow a remote side effect; inspect the account
+before retrying. Live API compatibility and workflow completion remain unverified.
