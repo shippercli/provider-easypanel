@@ -22,6 +22,7 @@ Supported:
 Not yet supported by the provider:
 
 - Rollback
+- Daemon/process supervision
 - Resource limits, mounts, and persistent-volume lifecycle
 
 EasyPanel may provide those capabilities in its UI, but this package does not claim support until their API behavior and cleanup semantics have dedicated tests.

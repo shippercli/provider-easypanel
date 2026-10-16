@@ -44,7 +44,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             'env' => ['state' => 'supported'],
             'databases' => ['state' => 'supported'],
             'profiles' => ['state' => 'supported'],
-            'background_workloads' => ['state' => 'partial', 'limitations' => ['Queue workers are provisioned as managed app services; other workload types are not modeled.']],
+            'background_workloads' => ['state' => 'partial', 'limitations' => ['Queue workers use managed app services; scheduled jobs use a managed Box service and require a Git or GitHub source. Daemon/process supervision is not implemented.']],
             'observability' => ['state' => 'partial', 'limitations' => ['Service logs require EasyPanel log aggregation to be enabled.']],
             'rollback' => ['state' => 'unsupported'],
             'previews' => ['state' => 'partial', 'limitations' => ['Owned preview services can be enumerated and removed through the core orphan-cleanup flow; EasyPanel domain cleanup remains provider API dependent.']],
