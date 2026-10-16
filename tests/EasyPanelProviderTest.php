@@ -262,15 +262,18 @@ final class EasyPanelProviderTest extends TestCase
     public function test_apply_provisions_a_configured_database_service(): void
     {
         $calls = [];
+        $environment = '';
         $client = new EasyPanelClient(
             'https://panel.example.com',
             'token',
-            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+            transport: static function (string $procedure, array $input) use (&$calls, &$environment): mixed {
                 $calls[] = [$procedure, $input];
+                if ($procedure === 'services.app.updateEnv') $environment = $input['env'];
 
                 return match ($procedure) {
                     'projects.listProjectsAndServices' => ['projects' => [], 'services' => []],
                     'domains.listDomains' => [],
+                    'services.app.inspectService' => ['env' => $environment],
                     default => null,
                 };
             },

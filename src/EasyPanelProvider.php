@@ -196,7 +196,28 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                 $client->createAppService($projectName, $serviceName);
             }
 
-            $databaseEnvironment = $this->applyDatabases($client, $project, $projectName, $this->environment($projectName, $profile, [], $existingEnvironment, $project));
+            $databaseEnvironment = $this->applyDatabases(
+                $client, $project, $projectName,
+                $this->environment($projectName, $profile, [], $existingEnvironment, $project),
+                function (array $connection) use ($client, $project, $profile, $projectName, $serviceName, &$existingEnvironment): void {
+                    try {
+                        $client->updateEnvironment($projectName, $serviceName, $this->environment($projectName, $profile, $connection, $existingEnvironment, $project));
+                        $inspection = $client->inspectAppService($projectName, $serviceName);
+                        if (! \is_string($inspection['env'] ?? null)) {
+                            throw new \RuntimeException('Missing environment');
+                        }
+                        $saved = $this->databaseApplicationEnvironment($project, $inspection['env']);
+                        foreach ($connection as $key => $value) {
+                            if (($saved[$key] ?? null) !== $value) {
+                                throw new \RuntimeException('Connection mismatch');
+                            }
+                        }
+                        $existingEnvironment = $inspection['env'];
+                    } catch (\Throwable) {
+                        throw new \RuntimeException('EasyPanel database connection environment could not be verified; review the created database before retrying.');
+                    }
+                },
+            );
 
             $source = $this->source($project, $profile);
             \assert($source !== null);
@@ -373,7 +394,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         return $available;
     }
 
-    private function applyDatabases(EasyPanelClient $client, object $project, string $projectName, string $applicationEnvironment = ''): array
+    private function applyDatabases(EasyPanelClient $client, object $project, string $projectName, string $applicationEnvironment = '', ?callable $persistConnection = null): array
     {
         $environment = [];
         $databases = $this->sectionDeclared($project, 'databases', 'databases') && method_exists($project, 'databases')
@@ -431,6 +452,9 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                 $prefix.'_USERNAME' => $username,
                 $prefix.'_PASSWORD' => $password,
             ];
+            if ($persistConnection !== null) {
+                $persistConnection($environment);
+            }
         }
 
         if ($this->booleanConfig('reconcile_databases', false)) {

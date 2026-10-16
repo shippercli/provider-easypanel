@@ -319,3 +319,19 @@ no concrete inspection response schema; do not infer completion from an invented
 field. A reliable completion contract and live account lifecycle verification
 remain required. See [deploy API](https://easypanel.io/docs/api/services/app/deployAppService)
 and [inspection API](https://easypanel.io/docs/api/services/app/inspectAppService).
+
+### Partial database provisioning
+
+After each confirmed database creation, the audit candidate writes the accumulated
+connection variables into the app environment and reads them back before creating
+another database. Missing, incomplete, or mismatched readback stops apply with a
+fixed diagnostic. Earlier confirmed credentials can therefore survive a later
+creation failure and be reused by a fresh provider instance without recreating
+the first database. Local transport regressions cover this retry and ignored or
+malformed environment writes; live database connectivity remains unverified.
+
+Creation and credential delivery are separate remote operations. A process crash,
+ambiguous create response or failed credential write can still leave a created
+resource requiring manual recovery. This is not a durable transaction or a
+password-rotation mechanism. The final environment update and worker/scheduler
+delivery retain their existing behavior.
