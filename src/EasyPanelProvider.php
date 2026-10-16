@@ -626,11 +626,20 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             throw new \InvalidArgumentException('EasyPanel database_environment_prefixes must be a map of database names to environment prefixes.');
         }
         $prefixes = [];
+        $serviceNames = [];
         foreach ($databases as $database) {
             if (! \is_object($database) || ! \method_exists($database, 'name')) {
                 throw new \InvalidArgumentException('EasyPanel database declarations require a name.');
             }
             $name = $database->name();
+            if (! \is_string($name) || \trim($name) === '') {
+                throw new \InvalidArgumentException('EasyPanel database declarations require a nonempty string name.');
+            }
+            $serviceName = $this->databaseServiceName($name);
+            if (isset($serviceNames[$serviceName])) {
+                throw new \InvalidArgumentException('EasyPanel database names must resolve to distinct service names after normalization and truncation.');
+            }
+            $serviceNames[$serviceName] = true;
             $prefix = $configured[$name] ?? (\count($databases) === 1 ? 'DB' : null);
             if (! \is_string($prefix) || \preg_match('/\A[A-Z_][A-Z0-9_]*\z/', $prefix) !== 1) {
                 throw new \InvalidArgumentException("EasyPanel database {$name} requires a valid database_environment_prefixes entry when multiple databases are declared.");
