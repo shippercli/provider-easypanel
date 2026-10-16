@@ -20,7 +20,9 @@ class ResponsesTest(unittest.TestCase):
                 body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
                 received.append((self.path, self.headers.get('Authorization'), body))
                 procedure = self.path.rsplit('/', 1)[-1]
-                if self.path.startswith('/inspection-identity/'):
+                if self.path.startswith('/database-target/'):
+                    status, payload = 200, b'{"json":null}'
+                elif self.path.startswith('/inspection-identity/'):
                     kind, case, format_ = self.path.split('/')[2:5]
                     data = {'projectName': 'fixture', 'name': 'target', 'serviceName': 'target', 'type': kind,
                         'env': 'SHIPPERCLI_MANAGED=1'}
@@ -108,9 +110,16 @@ class ResponsesTest(unittest.TestCase):
                 result = subprocess.run(['php', str(Path(__file__).with_name('verify-responses.php')), f'http://127.0.0.1:{server.server_port}'], capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(redirected, [])
-                self.assertEqual(len(received), 151)
+                self.assertEqual(len(received), 157)
                 self.assertTrue(all(auth == 'synthetic-authorization-secret' for _, auth, _ in received))
                 self.assertEqual(sum(b'synthetic-body-secret' in body for _, _, body in received), 26)
+                target_requests = [(path, json.loads(body)['json']) for path, _, body in received if path.startswith('/database-target/')]
+                self.assertEqual(len(target_requests), 6)
+                for path, fields in target_requests:
+                    self.assertEqual(fields, {'projectName': 'fixture', 'serviceName': 'db',
+                        'databaseName': 'application', 'password': 'synthetic-database-password'})
+                self.assertEqual({path.rsplit('/', 1)[-1] for path, _ in target_requests}, {
+                    'services.' + kind + '.createService' for kind in ['mysql', 'mariadb', 'postgres', 'mongo', 'redis']})
             finally:
                 server.shutdown()
                 thread.join(timeout=2)

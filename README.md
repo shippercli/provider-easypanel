@@ -249,3 +249,10 @@ requested project, service and canonical service type. Diagnostics do not echo
 the returned values. Responses omitting these fields remain supported, so this
 is contradiction detection rather than independent proof of target identity.
 Ownership environment markers and live verification are still required.
+
+Database creation payloads cannot override the explicit project/service arguments.
+Conflicting or malformed `projectName`/`serviceName` payload fields are rejected
+before sending a request; matching duplicates and other database options remain
+supported. The provider's existing internal payload already supplies fixed
+targets; this guard also protects direct client use. It does not validate every
+database option or prove the resulting database is usable.

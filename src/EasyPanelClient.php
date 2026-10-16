@@ -156,10 +156,15 @@ final class EasyPanelClient
     public function createDatabaseService(string $type, string $projectName, string $serviceName, array $payload = []): void
     {
         $type = $this->databaseType($type);
+        foreach (['projectName' => $projectName, 'serviceName' => $serviceName] as $key => $expected) {
+            if (\array_key_exists($key, $payload) && $payload[$key] !== $expected) {
+                throw new \InvalidArgumentException('EasyPanel database payload must not override the target identity.');
+            }
+        }
         $this->call('services.'.$type.'.createService', [
+            ...$payload,
             'projectName' => $projectName,
             'serviceName' => $serviceName,
-            ...$payload,
         ]);
     }
 

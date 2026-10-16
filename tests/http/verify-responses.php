@@ -125,3 +125,18 @@ foreach (['direct', 'nested'] as $format) {
     }
 }
 echo "36 real HTTP inspection identity rejections and six matched controls passed\n";
+
+$targetClient = new EasyPanelClient($argv[1].'/database-target', 'synthetic-authorization-secret');
+foreach (['projectName', 'serviceName'] as $field) {
+    foreach (['other', null, false, ['synthetic-secret']] as $value) {
+        $failure = null;
+        try { $targetClient->createDatabaseService('mysql', 'fixture', 'db', [$field => $value]); }
+        catch (InvalidArgumentException $exception) { $failure = $exception; }
+        if ($failure === null) throw new RuntimeException('Database target override accepted');
+    }
+}
+foreach (['mysql', 'mariadb', 'postgres', 'mongo', 'redis', 'postgresql'] as $type) {
+    $targetClient->createDatabaseService($type, 'fixture', 'db', ['projectName' => 'fixture', 'serviceName' => 'db',
+        'databaseName' => 'application', 'password' => 'synthetic-database-password']);
+}
+echo "Database target overrides blocked before HTTP; six valid engine/alias payloads sent unchanged\n";
