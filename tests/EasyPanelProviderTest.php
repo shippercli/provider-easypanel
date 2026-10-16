@@ -362,8 +362,8 @@ final class EasyPanelProviderTest extends TestCase
             'token',
             transport: static function (string $procedure, array $input) use (&$savedEnvironments, &$calls): mixed {
                 $calls[] = [$procedure, $input];
-                if ($procedure === 'services.app.updateEnv') $savedEnvironments[$input['serviceName']] = $input['env'];
-                if ($procedure === 'services.app.inspectService' && array_key_exists($input['serviceName'], $savedEnvironments)) return ['env' => $savedEnvironments[$input['serviceName']]];
+                if (in_array($procedure, ['services.app.updateEnv', 'services.box.updateEnv'], true)) $savedEnvironments[$input['serviceName']] = $input['env'];
+                if (in_array($procedure, ['services.app.inspectService', 'services.box.inspectService'], true) && array_key_exists($input['serviceName'], $savedEnvironments)) return ['env' => $savedEnvironments[$input['serviceName']]];
 
                 return match ($procedure) {
                     'projects.listProjectsAndServices' => ['projects' => [], 'services' => []],

@@ -336,5 +336,9 @@ resource requiring manual recovery. This is not a durable transaction or a
 password-rotation mechanism. The final app environment update is also read back and compared against all
 expected variables, including retained values, ownership markers, literal strings,
 numeric values and empty values. Unverified writes stop before workload, domain
-and deployment operations. Worker/scheduler environment delivery retains its
-existing behavior.
+and deployment operations. Worker and scheduler environment writes also require complete readback matching
+all expected variables before worker deployment settings/triggers or scheduler
+scripts are updated. Box scheduler inspection supports both a plain environment
+string and its nested `env.content` representation. Unit transport tests cover
+saved, ignored and malformed writes for both workload types; dedicated real HTTP
+workload-readback scenarios remain to be added.

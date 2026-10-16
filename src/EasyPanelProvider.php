@@ -223,22 +223,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             \assert($source !== null);
             $this->configureSource($client, $projectName, $serviceName, $source, $profile);
             $finalEnvironment = $this->environment($projectName, $profile, $databaseEnvironment, $existingEnvironment, $project);
-            try {
-                $expected = $this->databaseApplicationEnvironment($project, $finalEnvironment);
-                $client->updateEnvironment($projectName, $serviceName, $finalEnvironment);
-                $inspection = $client->inspectAppService($projectName, $serviceName);
-                if (! \is_string($inspection['env'] ?? null)) {
-                    throw new \RuntimeException('Missing environment');
-                }
-                $saved = $this->databaseApplicationEnvironment($project, $inspection['env']);
-                foreach ($expected as $key => $value) {
-                    if (($saved[$key] ?? null) !== $value) {
-                        throw new \RuntimeException('Environment mismatch');
-                    }
-                }
-            } catch (\Throwable) {
-                throw new \RuntimeException('EasyPanel application environment could not be verified.');
-            }
+            $this->writeVerifiedEnvironment($client, $project, $projectName, $serviceName, $finalEnvironment);
             $this->applyWorkers($client, $project, $profile, $projectName, $source, $databaseEnvironment);
             $this->applyCron($client, $project, $profile, $projectName, $source, $databaseEnvironment);
 
@@ -386,6 +371,36 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         return $this->lastError;
     }
 
+    private function writeVerifiedEnvironment(EasyPanelClient $client, object $project, string $projectName, string $serviceName, string $environment, string $type = 'app'): void
+    {
+        try {
+            $expected = $this->databaseApplicationEnvironment($project, $environment);
+            if ($type === 'box') {
+                $client->updateBoxEnvironment($projectName, $serviceName, $environment);
+                $inspection = $client->inspectBoxService($projectName, $serviceName);
+            } else {
+                $client->updateEnvironment($projectName, $serviceName, $environment);
+                $inspection = $client->inspectAppService($projectName, $serviceName);
+            }
+            $content = $inspection['env'] ?? null;
+            if ($type === 'box' && \is_array($content)) {
+                $content = $content['content'] ?? null;
+            }
+            if (! \is_string($content)) {
+                throw new \RuntimeException('Missing environment');
+            }
+            $saved = $this->databaseApplicationEnvironment($project, $content);
+            foreach ($expected as $key => $value) {
+                if (($saved[$key] ?? null) !== $value) {
+                    throw new \RuntimeException('Environment mismatch');
+                }
+            }
+        } catch (\Throwable) {
+            $label = $type === 'box' ? 'scheduler' : 'application';
+            throw new \RuntimeException("EasyPanel {$label} environment could not be verified.");
+        }
+    }
+
     /** @return array<string, string> */
     /** @return array<string, mixed> */
     private function databaseApplicationEnvironment(object $project, string $environment): array
@@ -516,7 +531,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             }
 
             $this->configureSource($client, $projectName, $workerName, $source, $profile);
-            $client->updateEnvironment($projectName, $workerName, $this->environment($projectName, $profile, $databaseEnvironment, $existingEnvironment, $project)."\nSHIPPERCLI_MANAGED_WORKER={$workerName}");
+            $this->writeVerifiedEnvironment($client, $project, $projectName, $workerName, $this->environment($projectName, $profile, $databaseEnvironment, $existingEnvironment, $project)."\nSHIPPERCLI_MANAGED_WORKER={$workerName}");
             $connection = method_exists($queue, 'connection') ? $queue->connection() : 'database';
             $queueName = method_exists($queue, 'queue') ? $queue->queue() : 'default';
             $command = "php artisan queue:work {$connection} --queue={$queueName}";
@@ -578,10 +593,10 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             $this->profileBranch($profile),
             $this->privateRepository($source),
         );
-        $client->updateBoxEnvironment(
-            $projectName,
-            $serviceName,
+        $this->writeVerifiedEnvironment(
+            $client, $project, $projectName, $serviceName,
             $this->environment($projectName, $profile, $databaseEnvironment, $existingEnvironment, $project)."\nSHIPPERCLI_MANAGED_CRON={$serviceName}",
+            'box',
         );
 
         $scripts = [];

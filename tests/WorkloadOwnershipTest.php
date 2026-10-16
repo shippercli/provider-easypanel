@@ -17,8 +17,9 @@ final class WorkloadOwnershipTest extends TestCase
                 $calls = [];
                 $env = 'DB_PASSWORD=retained-secret';
                 if ($owned) $env .= "\nSHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=project\nSHIPPERCLI_MANAGED_{$kind}={$name}";
-                $client = new EasyPanelClient('https://panel.example.test', 'token', transport: static function (string $procedure, array $input) use (&$calls, $env, $name, $type): mixed {
+                $client = new EasyPanelClient('https://panel.example.test', 'token', transport: static function (string $procedure, array $input) use (&$calls, &$env, $name, $type): mixed {
                     $calls[] = [$procedure, $input];
+                    if (str_ends_with($procedure, 'updateEnv')) $env = is_array($input['env']) ? $input['env']['content'] : $input['env'];
                     if ($procedure === 'projects.listProjectsAndServices') return ['projects' => [['name' => 'project']], 'services' => [['projectName' => 'project', 'name' => $name, 'type' => $type]]];
                     if (str_ends_with($procedure, 'inspectService')) return ['env' => $type === 'box' ? ['content' => $env] : $env];
                     return null;
