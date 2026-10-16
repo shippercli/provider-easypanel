@@ -88,6 +88,35 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         $serviceName = $this->serviceName();
         $source = $this->source($project, $profile) ?? ['type' => 'unknown'];
         $domain = $this->normalizeDomain($this->profileValue($profile, 'domain'));
+        $blocked = null;
+        $errors = $this->validate($project, $profile);
+        if ($errors !== []) {
+            $blocked = implode(' ', $errors);
+        } else {
+            try {
+                $client = $this->getClient();
+                $inventory = $client->listProjectsAndServices();
+                if ($this->projectExists($inventory, $this->legacyManagedProjectName($project, $profile))) {
+                    $blocked = 'A legacy EasyPanel project requires explicit ownership review and migration.';
+                } else {
+                    $service = $this->findService($inventory, $projectName, $serviceName);
+                    if ($service !== null) {
+                        if (($service['type'] ?? null) !== 'app') {
+                            $blocked = 'The EasyPanel app service name is occupied by another service type.';
+                        } else {
+                            $details = $client->inspectAppService($projectName, $serviceName);
+                            $env = is_string($details['env'] ?? null) ? $details['env'] : '';
+                            if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
+                                || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
+                                $blocked = 'Existing EasyPanel service lacks matching project/profile ownership markers.';
+                            }
+                        }
+                    }
+                }
+            } catch (\Throwable) {
+                $blocked = 'Unable to verify EasyPanel ownership. Check API access before planning changes.';
+            }
+        }
         $actions = [
             'Create or reuse managed EasyPanel project: '.$projectName,
             'Create or reuse app service: '.$serviceName,
@@ -111,8 +140,11 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             'service' => $serviceName,
             'source_type' => $source['type'] ?? 'unknown',
             'domain' => $domain,
-            'actions' => $actions,
-            'note' => 'Shipper will only clean up the exact service after verifying its ownership marker.',
+            'blocked' => $blocked !== null,
+            'actions' => $blocked === null ? $actions : ['BLOCKED: '.$blocked],
+            'note' => $blocked === null
+                ? 'Database and workload prerequisites are rechecked during apply.'
+                : 'No deployment actions are authorized by this plan.',
         ];
     }
 

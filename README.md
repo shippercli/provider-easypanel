@@ -165,3 +165,13 @@ adopt or migrate legacy projects.
 composer install
 composer test
 ```
+
+### Plan ownership inspection
+
+Plan validates configuration and reads EasyPanel project/service inventory. It
+requires API access and performs no writes. Legacy project names, occupied app
+names of another service type, missing or malformed ownership markers, and API
+read failures return `blocked: true` with one actionable blocked entry. The core
+CLI enforcement is proposed in shippercli/cli#154. Database and workload
+prerequisites remain subject to validation during apply; an unblocked app plan
+does not prove every deployment prerequisite or live connection is ready.
