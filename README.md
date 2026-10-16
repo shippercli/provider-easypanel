@@ -275,3 +275,13 @@ operation with an unconfirmed result. Verification performs one read and no
 repeat delete; asynchronous completion may require a later status check. This
 adds observation-time completion checks and does not provide shared locking,
 physical erasure guarantees or transactional cleanup.
+
+### Service name conflicts
+
+The application `service_name` must differ from every declared database service
+(`db-` plus its normalized name) and active queue worker (`worker-` plus its
+normalized name). The fixed `scheduler` service name is reserved, including when
+no cron jobs are declared, because scheduler reconciliation inspects that name.
+Active queue names and cron script names must also remain distinct after
+lowercasing, punctuation normalization and truncation to 48 characters.
+Configuration validation rejects these conflicts before deployment API calls.

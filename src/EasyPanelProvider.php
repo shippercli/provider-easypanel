@@ -682,6 +682,9 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                     continue;
                 }
                 $resolved = $this->slug((string) $name);
+                if ($section === 'queues' && 'worker-'.$resolved === $this->serviceName()) {
+                    throw new \InvalidArgumentException('EasyPanel application service name conflicts with a declared worker service.');
+                }
                 if (isset($names[$resolved])) {
                     throw new \InvalidArgumentException('EasyPanel '.$section.' names must remain distinct after normalization and truncation.');
                 }
@@ -715,6 +718,9 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                 throw new \InvalidArgumentException('EasyPanel database declarations require a nonempty string name.');
             }
             $serviceName = $this->databaseServiceName($name);
+            if ($serviceName === $this->serviceName()) {
+                throw new \InvalidArgumentException('EasyPanel application service name conflicts with a declared database service.');
+            }
             if (isset($serviceNames[$serviceName])) {
                 throw new \InvalidArgumentException('EasyPanel database names must resolve to distinct service names after normalization and truncation.');
             }
@@ -839,6 +845,9 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         }
 
         $serviceName = $this->serviceName();
+        if ($serviceName === 'scheduler') {
+            $errors[] = 'EasyPanel application service name conflicts with the reserved scheduler service.';
+        }
         if (! \preg_match('/^[a-z0-9][a-z0-9-]*$/', $serviceName)) {
             $errors[] = 'EasyPanel service_name must be a lowercase slug.';
         }

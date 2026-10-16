@@ -48,4 +48,29 @@ final class WorkloadNameCollisionTest extends TestCase
         $provider = new EasyPanelProvider;
         self::assertNull((new \ReflectionMethod($provider, 'assertUniqueWorkloadNames'))->invoke($provider, $project));
     }
+    public function testApplicationCannotOccupyDeclaredWorkloadOrSchedulerNames(): void
+    {
+        foreach (['db-main', 'worker-main', 'scheduler'] as $serviceName) {
+            $calls = [];
+            $client = new EasyPanelClient('https://panel.example.com', 'synthetic', transport: static function ($procedure, $input) use (&$calls): array {
+                $calls[] = $procedure;
+                return [];
+            });
+            $project = new class {
+                public function name(): string { return 'api'; }
+                public function databases(): array { return [new class {
+                    public function name(): string { return 'main'; }
+                }]; }
+                public function queues(): array { return ['main' => new class {
+                    public function enabled(): bool { return true; }
+                }]; }
+            };
+            $provider = new EasyPanelProvider(['url' => 'https://panel.example.com', 'auth_token' => 'synthetic',
+                'service_name' => $serviceName, 'source' => ['type' => 'image', 'image' => 'nginx:alpine']], $client);
+            self::assertFalse($provider->apply($project, new \stdClass));
+            self::assertStringContainsString('application service name conflicts', $provider->getLastError());
+            self::assertTrue($provider->plan($project, new \stdClass)['blocked']);
+            self::assertSame([], $calls);
+        }
+    }
 }
