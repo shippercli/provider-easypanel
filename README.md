@@ -193,3 +193,16 @@ loopback server using synthetic credentials. It covers 301/302/303/307/308,
 responses, and malformed-URL diagnostics. The pre-fix code accepted a 301 with
 success-shaped JSON and leaked synthetic credentials echoed in a 400 response.
 The check runs in PHP matrix CI. It does not prove live EasyPanel compatibility.
+
+
+### Distribution archive checks
+
+Composer archive exclusions and Git export attributes omit installed dependencies,
+tests, workflow files, root environment/auth configuration, and PHPUnit caches and
+configuration. Runtime source, package metadata, documentation, and assets remain
+available. `python3 tests/package/verify-dist.py` checks Composer and Git exports,
+then loads all declared runtime classes from an extracted ZIP with an overridden
+class map. Dependency classes come from the installed checkout; this check does
+not perform a fresh production dependency install or live deployment. CI runs it
+with the existing provider tests. Git export verification uses current worktree
+attributes; committed attributes determine subsequent GitHub source archives.

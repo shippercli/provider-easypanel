@@ -22,5 +22,16 @@
   },
   "extra": {
     "shipper-plugin": "ShipperCli\\ProviderEasyPanel\\EasyPanelPlugin"
+  },
+  "archive": {
+    "exclude": [
+      "/vendor",
+      "/tests",
+      "/.github",
+      "/.env*",
+      "/auth.json",
+      "/.phpunit*",
+      "/phpunit.xml*"
+    ]
   }
 }
