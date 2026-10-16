@@ -41,7 +41,7 @@ final class PartialDatabaseProvisioningTest extends TestCase
                 [['projectName' => $name, 'name' => 'app', 'type' => 'app']],
                 array_map(static fn ($key) => ['projectName' => $name, 'name' => $key, 'type' => 'mysql'], array_keys($databases)),
             )];
-            if ($procedure === 'services.app.inspectService') return ['env' => $written && $mode === 'malformed' ? $environment.'\nBROKEN="unfinished' : $environment];
+            if ($procedure === 'services.app.inspectService') return ['env' => $written && $mode === 'malformed' ? $environment."\nBROKEN=\"unfinished" : $environment];
             if ($procedure === 'services.app.updateEnv') { $written = true; if ($mode !== 'ignored') $environment = $input['env']; return []; }
             if ($procedure === 'services.mysql.inspectService') return ['env' => $databases[$input['serviceName']]['env']];
             if ($procedure === 'services.mysql.createService') {

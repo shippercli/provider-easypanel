@@ -222,7 +222,23 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             $source = $this->source($project, $profile);
             \assert($source !== null);
             $this->configureSource($client, $projectName, $serviceName, $source, $profile);
-            $client->updateEnvironment($projectName, $serviceName, $this->environment($projectName, $profile, $databaseEnvironment, $existingEnvironment, $project));
+            $finalEnvironment = $this->environment($projectName, $profile, $databaseEnvironment, $existingEnvironment, $project);
+            try {
+                $expected = $this->databaseApplicationEnvironment($project, $finalEnvironment);
+                $client->updateEnvironment($projectName, $serviceName, $finalEnvironment);
+                $inspection = $client->inspectAppService($projectName, $serviceName);
+                if (! \is_string($inspection['env'] ?? null)) {
+                    throw new \RuntimeException('Missing environment');
+                }
+                $saved = $this->databaseApplicationEnvironment($project, $inspection['env']);
+                foreach ($expected as $key => $value) {
+                    if (($saved[$key] ?? null) !== $value) {
+                        throw new \RuntimeException('Environment mismatch');
+                    }
+                }
+            } catch (\Throwable) {
+                throw new \RuntimeException('EasyPanel application environment could not be verified.');
+            }
             $this->applyWorkers($client, $project, $profile, $projectName, $source, $databaseEnvironment);
             $this->applyCron($client, $project, $profile, $projectName, $source, $databaseEnvironment);
 

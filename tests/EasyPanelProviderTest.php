@@ -154,11 +154,14 @@ final class EasyPanelProviderTest extends TestCase
     public function test_apply_creates_and_deploys_only_the_derived_managed_resources(): void
     {
         $calls = [];
+        $savedEnvironments = [];
         $client = new EasyPanelClient(
             'https://panel.example.com',
             'token',
-            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+            transport: static function (string $procedure, array $input) use (&$savedEnvironments, &$calls): mixed {
                 $calls[] = [$procedure, $input];
+                if ($procedure === 'services.app.updateEnv') $savedEnvironments[$input['serviceName']] = $input['env'];
+                if ($procedure === 'services.app.inspectService' && array_key_exists($input['serviceName'], $savedEnvironments)) return ['env' => $savedEnvironments[$input['serviceName']]];
 
                 return match ($procedure) {
                     'projects.listProjectsAndServices' => ['projects' => [], 'services' => []],
@@ -176,6 +179,7 @@ final class EasyPanelProviderTest extends TestCase
             'services.app.createService',
             'services.app.updateSourceImage',
             'services.app.updateEnv',
+            'services.app.inspectService',
             'projects.listProjectsAndServices',
             'projects.listProjectsAndServices',
             'domains.listDomains',
@@ -186,15 +190,18 @@ final class EasyPanelProviderTest extends TestCase
         self::assertSame('shippercli-demo-provider-v1-811454f76c57a1580028', $calls[2][1]['projectName']);
         self::assertStringContainsString('SHIPPERCLI_MANAGED=1', $calls[4][1]['env']);
         self::assertStringContainsString('SHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028', $calls[4][1]['env']);
-        self::assertSame('demo.shippercli.com', $calls[8][1]['host']);
+        self::assertSame('demo.shippercli.com', $calls[9][1]['host']);
     }
 
     public function test_apply_removes_an_owned_worker_removed_from_configuration(): void
     {
         $calls = [];
+        $savedEnvironments = [];
         $removed = false;
-        $client = new EasyPanelClient('https://panel.example.com', 'token', transport: static function (string $procedure, array $input) use (&$calls, &$removed): mixed {
+        $client = new EasyPanelClient('https://panel.example.com', 'token', transport: static function (string $procedure, array $input) use (&$savedEnvironments, &$calls, &$removed): mixed {
             $calls[] = [$procedure, $input];
+                if ($procedure === 'services.app.updateEnv') $savedEnvironments[$input['serviceName']] = $input['env'];
+                if ($procedure === 'services.app.inspectService' && array_key_exists($input['serviceName'], $savedEnvironments)) return ['env' => $savedEnvironments[$input['serviceName']]];
             if ($procedure === 'services.app.destroyService') $removed = true;
 
             return match ($procedure) {
@@ -226,9 +233,12 @@ final class EasyPanelProviderTest extends TestCase
     public function test_apply_can_reconcile_an_owned_database_when_explicitly_enabled(): void
     {
         $calls = [];
+        $savedEnvironments = [];
         $removed = false;
-        $client = new EasyPanelClient('https://panel.example.com', 'token', transport: static function (string $procedure, array $input) use (&$calls, &$removed): mixed {
+        $client = new EasyPanelClient('https://panel.example.com', 'token', transport: static function (string $procedure, array $input) use (&$savedEnvironments, &$calls, &$removed): mixed {
             $calls[] = [$procedure, $input];
+                if ($procedure === 'services.app.updateEnv') $savedEnvironments[$input['serviceName']] = $input['env'];
+                if ($procedure === 'services.app.inspectService' && array_key_exists($input['serviceName'], $savedEnvironments)) return ['env' => $savedEnvironments[$input['serviceName']]];
             if ($procedure === 'services.postgres.destroyService') $removed = true;
 
             return match ($procedure) {
@@ -302,11 +312,14 @@ final class EasyPanelProviderTest extends TestCase
     public function test_apply_reuses_an_existing_database_with_an_alias_type(): void
     {
         $calls = [];
+        $savedEnvironments = [];
         $client = new EasyPanelClient(
             'https://panel.example.com',
             'token',
-            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+            transport: static function (string $procedure, array $input) use (&$savedEnvironments, &$calls): mixed {
                 $calls[] = [$procedure, $input];
+                if ($procedure === 'services.app.updateEnv') $savedEnvironments[$input['serviceName']] = $input['env'];
+                if ($procedure === 'services.app.inspectService' && array_key_exists($input['serviceName'], $savedEnvironments)) return ['env' => $savedEnvironments[$input['serviceName']]];
 
                 return match ($procedure) {
                     'projects.listProjectsAndServices' => [
@@ -343,11 +356,14 @@ final class EasyPanelProviderTest extends TestCase
     public function test_apply_translates_named_cron_frequency_to_an_easy_panel_expression(): void
     {
         $calls = [];
+        $savedEnvironments = [];
         $client = new EasyPanelClient(
             'https://panel.example.com',
             'token',
-            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+            transport: static function (string $procedure, array $input) use (&$savedEnvironments, &$calls): mixed {
                 $calls[] = [$procedure, $input];
+                if ($procedure === 'services.app.updateEnv') $savedEnvironments[$input['serviceName']] = $input['env'];
+                if ($procedure === 'services.app.inspectService' && array_key_exists($input['serviceName'], $savedEnvironments)) return ['env' => $savedEnvironments[$input['serviceName']]];
 
                 return match ($procedure) {
                     'projects.listProjectsAndServices' => ['projects' => [], 'services' => []],

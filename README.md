@@ -333,5 +333,8 @@ malformed environment writes; live database connectivity remains unverified.
 Creation and credential delivery are separate remote operations. A process crash,
 ambiguous create response or failed credential write can still leave a created
 resource requiring manual recovery. This is not a durable transaction or a
-password-rotation mechanism. The final environment update and worker/scheduler
-delivery retain their existing behavior.
+password-rotation mechanism. The final app environment update is also read back and compared against all
+expected variables, including retained values, ownership markers, literal strings,
+numeric values and empty values. Unverified writes stop before workload, domain
+and deployment operations. Worker/scheduler environment delivery retains its
+existing behavior.
