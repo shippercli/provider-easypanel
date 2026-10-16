@@ -30,16 +30,18 @@ final class WorkloadOwnershipTest extends TestCase
                 $profile = new class { public function name(): string { return 'production'; } };
                 $provider = new EasyPanelProvider([], $client);
                 $method = new \ReflectionMethod($provider, $kind === 'WORKER' ? 'applyWorkers' : 'applyCron');
+                $failure = null;
                 try {
                     $method->invoke($provider, $client, $project, $profile, 'project', ['type' => 'git', 'repo' => 'https://github.com/example/app.git']);
-                    self::assertTrue($owned, 'An unowned workload must be refused.');
+                } catch (\RuntimeException $exception) { $failure = $exception; }
+                self::assertSame($owned, $failure === null, 'Workload ownership result did not match its scope.');
+                if ($failure === null) {
                     $updates = array_values(array_filter($calls, static fn (array $call): bool => str_ends_with($call[0], 'updateEnv')));
                     self::assertCount(1, $updates);
                     $updated = $updates[0][1]['env'];
                     self::assertStringContainsString('DB_PASSWORD=retained-secret', is_array($updated) ? $updated['content'] : $updated);
-                } catch (\RuntimeException $exception) {
-                    self::assertFalse($owned, $exception->getMessage());
-                    self::assertStringContainsString('ownership markers', $exception->getMessage());
+                } else {
+                    self::assertStringContainsString('ownership markers', $failure->getMessage());
                     foreach ($calls as [$procedure]) self::assertTrue($procedure === 'projects.listProjectsAndServices' || str_ends_with($procedure, 'inspectService'));
                 }
             }
@@ -57,13 +59,15 @@ final class WorkloadOwnershipTest extends TestCase
                 return str_ends_with($procedure, 'inspectService') ? ['env' => ['content' => $env]] : null;
             });
             $provider = new EasyPanelProvider([], $client);
+            $failure = null;
             try {
                 (new \ReflectionMethod($provider, 'destroyOwnedCronService'))->invoke($provider, $client, 'project', ['type' => 'box']);
-                self::assertTrue($owned);
+            } catch (\RuntimeException $exception) { $failure = $exception; }
+            self::assertSame($owned, $failure === null);
+            if ($failure === null) {
                 self::assertSame(['services.box.inspectService', 'services.box.destroyService', 'projects.listProjectsAndServices'], $calls);
-            } catch (\RuntimeException $exception) {
-                self::assertFalse($owned);
-                self::assertStringContainsString('ownership markers', $exception->getMessage());
+            } else {
+                self::assertStringContainsString('ownership markers', $failure->getMessage());
                 self::assertSame(['services.box.inspectService'], $calls);
             }
         }

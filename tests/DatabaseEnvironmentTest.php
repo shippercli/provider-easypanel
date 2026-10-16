@@ -68,13 +68,13 @@ final class DatabaseEnvironmentTest extends TestCase
             };
         });
         $provider = new EasyPanelProvider(['database_environment_prefixes' => ['main' => 'DB', 'analytics' => 'ANALYTICS_DB']], $client);
+        $failure = null;
         try {
             (new \ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, $this->project(), 'owned-project');
-            self::fail('An unmanaged database must not be reused.');
-        } catch (\RuntimeException $exception) {
-            self::assertStringContainsString('ownership markers', $exception->getMessage());
-            self::assertSame(['projects.listProjectsAndServices', 'services.mysql.inspectService'], $calls);
-        }
+        } catch (\RuntimeException $exception) { $failure = $exception; }
+        self::assertNotNull($failure, 'An unmanaged database must not be reused.');
+        self::assertStringContainsString('ownership markers', $failure->getMessage());
+        self::assertSame(['projects.listProjectsAndServices', 'services.mysql.inspectService'], $calls);
     }
 
     public function testExistingDatabasesRequireMatchingConnectionSettingsWithoutRotation(): void
@@ -102,14 +102,14 @@ final class DatabaseEnvironmentTest extends TestCase
                 }]; }
             };
             $provider = new EasyPanelProvider([], $client);
+            $failure = null;
+            $result = null;
             try {
                 $result = (new \ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, $project, 'owned-project', $content);
-                self::assertTrue($valid);
-                self::assertSame([], $result);
-            } catch (\RuntimeException|\InvalidArgumentException $exception) {
-                self::assertFalse($valid);
-                self::assertStringNotContainsString('retained-secret', $exception->getMessage());
-            }
+            } catch (\RuntimeException|\InvalidArgumentException $exception) { $failure = $exception; }
+            self::assertSame($valid, $failure === null);
+            if ($failure === null) self::assertSame([], $result);
+            else self::assertStringNotContainsString('retained-secret', $failure->getMessage());
             self::assertSame($content === 'DB_PASSWORD="unterminated' ? [] : ['projects.listProjectsAndServices', 'services.mysql.inspectService'], $calls);
         }
     }
