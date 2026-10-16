@@ -140,3 +140,17 @@ foreach (['mysql', 'mariadb', 'postgres', 'mongo', 'redis', 'postgresql'] as $ty
         'databaseName' => 'application', 'password' => 'synthetic-database-password']);
 }
 echo "Database target overrides blocked before HTTP; six valid engine/alias payloads sent unchanged\n";
+
+$cleanupProject = new class { public function name(): string { return 'fixture'; } };
+$cleanupProfile = new class { public function name(): string { return 'production'; } };
+foreach (['absent', 'retain-project', 'other-service', 'pending-app', 'pending-project', 'unreadable'] as $case) {
+    $config = ['url' => $argv[1], 'auth_token' => 'synthetic-authorization-secret', 'service_name' => 'web',
+        'destroy_project' => !in_array($case, ['retain-project', 'pending-app'], true)];
+    $temporary = new \ShipperCli\ProviderEasyPanel\EasyPanelProvider($config);
+    $projectName = (new ReflectionMethod($temporary, 'managedProjectName'))->invoke($temporary, $cleanupProject, $cleanupProfile);
+    $api = new EasyPanelClient($argv[1].'/cleanup/'.$case.'/'.$projectName, 'synthetic-authorization-secret');
+    $provider = new \ShipperCli\ProviderEasyPanel\EasyPanelProvider($config, $api);
+    $expected = in_array($case, ['absent', 'retain-project', 'other-service'], true);
+    if ($provider->destroy($cleanupProject, $cleanupProfile) !== $expected) throw new RuntimeException('Invalid public cleanup verification: '.$case);
+}
+echo "Six public-provider cleanup HTTP flows passed\n";

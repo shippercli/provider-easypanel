@@ -439,18 +439,19 @@ final class EasyPanelProviderTest extends TestCase
     public function test_destroy_removes_only_a_marked_service_and_then_its_empty_managed_project(): void
     {
         $calls = [];
-        $listCount = 0;
+        $appDeleted = $projectDeleted = false;
         $client = new EasyPanelClient(
             'https://panel.example.com',
             'token',
-            transport: static function (string $procedure, array $input) use (&$calls, &$listCount): mixed {
+            transport: static function (string $procedure, array $input) use (&$calls, &$appDeleted, &$projectDeleted): mixed {
                 $calls[] = [$procedure, $input];
+                if ($procedure === 'services.app.destroyService') $appDeleted = true;
+                if ($procedure === 'projects.destroyProject') $projectDeleted = true;
                 if ($procedure === 'projects.listProjectsAndServices') {
-                    $listCount++;
 
                     return [
-                        'projects' => [['name' => 'shippercli-demo-provider-v1-811454f76c57a1580028']],
-                        'services' => $listCount === 1 ? [[
+                        'projects' => $projectDeleted ? [] : [['name' => 'shippercli-demo-provider-v1-811454f76c57a1580028']],
+                        'services' => !$appDeleted ? [[
                             'projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028',
                             'name' => 'web',
                             'type' => 'app',

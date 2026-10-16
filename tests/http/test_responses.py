@@ -11,6 +11,7 @@ class ResponsesTest(unittest.TestCase):
     def test_status_and_diagnostics(self):
         received = []
         redirected = []
+        cleanup_states = {}
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def log_message(self, *_args):
@@ -20,7 +21,24 @@ class ResponsesTest(unittest.TestCase):
                 body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
                 received.append((self.path, self.headers.get('Authorization'), body))
                 procedure = self.path.rsplit('/', 1)[-1]
-                if self.path.startswith('/database-target/'):
+                if self.path.startswith('/cleanup/'):
+                    case, project = self.path.split('/')[2:4]
+                    state = cleanup_states.setdefault(case, {'app': False, 'project': False})
+                    if procedure == 'services.app.destroyService':
+                        state['app'] = True
+                        data = None
+                    elif procedure == 'projects.destroyProject':
+                        state['project'] = True
+                        data = None
+                    elif procedure == 'services.app.inspectService':
+                        data = {'env': 'SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=' + project}
+                    else:
+                        projects = [] if state['project'] and case != 'pending-project' else [{'name': project}]
+                        services = [{'projectName': project, 'name': 'web', 'type': 'app'}] if not state['app'] or case == 'pending-app' else []
+                        if state['app'] and case == 'other-service': services.append({'projectName': project, 'name': 'other', 'type': 'app'})
+                        data = None if state['app'] and case == 'unreadable' else {'projects': projects, 'services': services}
+                    status, payload = 200, json.dumps({'json': data}).encode()
+                elif self.path.startswith('/database-target/'):
                     status, payload = 200, b'{"json":null}'
                 elif self.path.startswith('/inspection-identity/'):
                     kind, case, format_ = self.path.split('/')[2:5]
@@ -110,9 +128,13 @@ class ResponsesTest(unittest.TestCase):
                 result = subprocess.run(['php', str(Path(__file__).with_name('verify-responses.php')), f'http://127.0.0.1:{server.server_port}'], capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(redirected, [])
-                self.assertEqual(len(received), 157)
+                self.assertEqual(len(received), 203)
                 self.assertTrue(all(auth == 'synthetic-authorization-secret' for _, auth, _ in received))
                 self.assertEqual(sum(b'synthetic-body-secret' in body for _, _, body in received), 26)
+                for case in ['absent', 'retain-project', 'other-service', 'pending-app', 'pending-project', 'unreadable']:
+                    procedures = [path.rsplit('/', 1)[-1] for path, _, _ in received if path.startswith('/cleanup/' + case + '/')]
+                    self.assertEqual(procedures.count('services.app.destroyService'), 1)
+                    self.assertEqual(procedures.count('projects.destroyProject'), 1 if case in ['absent', 'pending-project'] else 0)
                 target_requests = [(path, json.loads(body)['json']) for path, _, body in received if path.startswith('/database-target/')]
                 self.assertEqual(len(target_requests), 6)
                 for path, fields in target_requests:

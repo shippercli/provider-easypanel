@@ -275,10 +275,17 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             $this->destroyDatabases($client, $project, $projectName);
             $client->destroyAppService($projectName, $serviceName);
 
+            $remaining = $client->listProjectsAndServices();
+            if ($this->findService($remaining, $projectName, $serviceName) !== null) {
+                throw new \RuntimeException('EasyPanel app deletion remains unconfirmed; the service is still visible. Recheck before retrying.');
+            }
             if ($this->booleanConfig('destroy_project', true)) {
-                $remaining = $client->listProjectsAndServices();
                 if (! $this->projectHasServices($remaining, $projectName)) {
                     $client->destroyProject($projectName);
+                    $afterProject = $client->listProjectsAndServices();
+                    if ($this->projectExists($afterProject, $projectName)) {
+                        throw new \RuntimeException('EasyPanel project deletion remains unconfirmed; the project is still visible. Recheck before retrying.');
+                    }
                 }
             }
 

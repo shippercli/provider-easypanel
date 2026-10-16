@@ -256,3 +256,13 @@ before sending a request; matching duplicates and other database options remain
 supported. The provider's existing internal payload already supplies fixed
 targets; this guard also protects direct client use. It does not validate every
 database option or prove the resulting database is usable.
+
+Cleanup verifies a fresh inventory after deleting the main app, even when
+`destroy_project: false`. A still-visible app or unreadable inventory stops the
+flow. If project cleanup is enabled and no services remain, a second fresh read
+must show the project absent after its deletion request. Other services are
+preserved and prevent project deletion. Each verification makes one observation
+and sends no repeated delete; asynchronous work may return an unconfirmed result
+requiring a status check before retry. This proves observed API inventory
+absence, not physical erasure, worker/database completion, or transactional
+cleanup. Live account verification remains required.
