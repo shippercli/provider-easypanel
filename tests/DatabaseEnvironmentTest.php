@@ -76,4 +76,41 @@ final class DatabaseEnvironmentTest extends TestCase
         }
     }
 
+    public function testExistingDatabasesRequireMatchingConnectionSettingsWithoutRotation(): void
+    {
+        foreach ([
+            ["DB_HOST=db-main\nDB_DATABASE=main\nDB_USERNAME=main\nDB_PASSWORD='retained-secret'", true],
+            ["DB_HOST=db-main\nDB_DATABASE=main\nDB_USERNAME=main", false],
+            ["DB_HOST=db-main\nDB_DATABASE=other\nDB_USERNAME=main\nDB_PASSWORD=retained-secret", false],
+            ["DB_PASSWORD=\"unterminated", false],
+        ] as [$content, $valid]) {
+            $calls = [];
+            $client = new EasyPanelClient('https://panel.example.test', 'token', transport: static function (string $procedure, array $input) use (&$calls): mixed {
+                $calls[] = $procedure;
+                return match ($procedure) {
+                    'projects.listProjectsAndServices' => ['projects' => [['name' => 'owned-project']], 'services' => [['projectName' => 'owned-project', 'name' => 'db-main', 'type' => 'mysql']]],
+                    'services.mysql.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=owned-project"],
+                    default => throw new \LogicException('Unexpected mutation: '.$procedure),
+                };
+            });
+            $project = new class {
+                public function databases(): array { return [new class {
+                    public function name(): string { return 'main'; }
+                    public function user(): string { return 'main'; }
+                    public function type(): string { return 'mysql'; }
+                }]; }
+            };
+            $provider = new EasyPanelProvider([], $client);
+            try {
+                $result = (new \ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, $project, 'owned-project', $content);
+                self::assertTrue($valid);
+                self::assertSame([], $result);
+            } catch (\RuntimeException $exception) {
+                self::assertFalse($valid);
+                self::assertStringNotContainsString('retained-secret', $exception->getMessage());
+            }
+            self::assertSame(['projects.listProjectsAndServices', 'services.mysql.inspectService'], $calls);
+        }
+    }
+
 }

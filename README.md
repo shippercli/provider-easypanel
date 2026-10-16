@@ -47,7 +47,10 @@ environment identifiers and cannot be shared by databases. Passwords are
 generated independently unless a shared `database_password` is explicitly set.
 Re-apply preserves the existing application environment and does not rotate
 passwords for existing database services. An existing service's credentials
-must already be configured in the application; the provider cannot recover a
+must already be configured in the application or supplied through its configured
+environment. Reuse checks the matching database name and username, a host, and a
+nonempty password before deployment. Malformed or incomplete environment content
+fails without rotating the database password. The provider cannot recover a
 previously discarded password.
 
 ## Install

@@ -156,7 +156,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                 $client->createAppService($projectName, $serviceName);
             }
 
-            $databaseEnvironment = $this->applyDatabases($client, $project, $projectName);
+            $databaseEnvironment = $this->applyDatabases($client, $project, $projectName, $this->environment($projectName, $profile, [], $existingEnvironment));
 
             $source = $this->source($project, $profile);
             \assert($source !== null);
@@ -300,7 +300,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
     }
 
     /** @return array<string, string> */
-    private function applyDatabases(EasyPanelClient $client, object $project, string $projectName): array
+    private function applyDatabases(EasyPanelClient $client, object $project, string $projectName, string $applicationEnvironment = ''): array
     {
         $environment = [];
         $databases = $this->sectionDeclared($project, 'databases', 'databases') && method_exists($project, 'databases')
@@ -313,6 +313,8 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             }
             $type = $this->databaseType($database);
             $serviceName = $this->databaseServiceName($database->name());
+            $databaseName = $this->databaseIdentifier($database->name());
+            $username = method_exists($database, 'user') ? $this->databaseIdentifier($database->user()) : 'shipper';
             $inventory = $client->listProjectsAndServices();
             $service = $this->findService($inventory, $projectName, $serviceName);
             if ($service !== null) {
@@ -327,12 +329,22 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                     || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
                     throw new \RuntimeException("Refusing to reuse EasyPanel database {$serviceName} without matching Shipper ownership markers.");
                 }
+                try {
+                    $available = \Dotenv\Dotenv::parse($applicationEnvironment);
+                } catch (\Throwable) {
+                    throw new \RuntimeException('Cannot parse the application environment before reusing an EasyPanel database.');
+                }
+                $prefix = $prefixes[$database->name()];
+                if (($available[$prefix.'_DATABASE'] ?? null) !== $databaseName
+                    || ($available[$prefix.'_USERNAME'] ?? null) !== $username
+                    || ! \is_string($available[$prefix.'_HOST'] ?? null) || $available[$prefix.'_HOST'] === ''
+                    || ! \is_string($available[$prefix.'_PASSWORD'] ?? null) || $available[$prefix.'_PASSWORD'] === '') {
+                    throw new \RuntimeException("Existing EasyPanel database {$serviceName} requires matching {$prefix} connection settings and a password in the application environment.");
+                }
                 continue;
             }
 
             $password = (string) ($this->config['database_password'] ?? bin2hex(random_bytes(16)));
-            $databaseName = $this->databaseIdentifier($database->name());
-            $username = method_exists($database, 'user') ? $this->databaseIdentifier($database->user()) : 'shipper';
             $payload = [
                 'databaseName' => $databaseName,
                 'user' => $username,

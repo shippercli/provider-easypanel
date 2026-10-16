@@ -309,7 +309,7 @@ final class EasyPanelProviderTest extends TestCase
                             ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'db-main', 'type' => 'postgres'],
                         ],
                     ],
-                    'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1\nDB_HOST=db-main\nDB_PASSWORD=retained-secret"],
+                    'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1\nDB_HOST=db-main\nDB_DATABASE=main\nDB_USERNAME=shipper\nDB_PASSWORD=retained-secret"],
                     'services.postgres.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1"],
                     'domains.listDomains' => [],
                     default => null,
