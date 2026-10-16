@@ -20,7 +20,19 @@ class ResponsesTest(unittest.TestCase):
                 body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
                 received.append((self.path, self.headers.get('Authorization'), body))
                 procedure = self.path.rsplit('/', 1)[-1]
-                if self.path.startswith('/read/'):
+                if self.path.startswith('/inspection-identity/'):
+                    kind, case, format_ = self.path.split('/')[2:5]
+                    data = {'projectName': 'fixture', 'name': 'target', 'serviceName': 'target', 'type': kind,
+                        'env': 'SHIPPERCLI_MANAGED=1'}
+                    changes = {'parent': ('projectName', 'other'), 'null-parent': ('projectName', None),
+                        'name': ('name', 'other'), 'service-name': ('serviceName', 'other'),
+                        'type': ('type', 'other'), 'array-name': ('name', ['synthetic-secret'])}
+                    if case in changes:
+                        key, value = changes[case]
+                        data[key] = value
+                    envelope = {'json': data} if format_ == 'direct' else {'result': {'data': {'json': data}}}
+                    status, payload = 200, json.dumps(envelope).encode()
+                elif self.path.startswith('/read/'):
                     kind, case, format_ = self.path.split('/')[2:5]
                     if kind == 'domains':
                         payloads = {'null': None, 'object': {}, 'string': 'synthetic-secret',
@@ -96,7 +108,7 @@ class ResponsesTest(unittest.TestCase):
                 result = subprocess.run(['php', str(Path(__file__).with_name('verify-responses.php')), f'http://127.0.0.1:{server.server_port}'], capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(redirected, [])
-                self.assertEqual(len(received), 109)
+                self.assertEqual(len(received), 151)
                 self.assertTrue(all(auth == 'synthetic-authorization-secret' for _, auth, _ in received))
                 self.assertEqual(sum(b'synthetic-body-secret' in body for _, _, body in received), 26)
             finally:

@@ -103,3 +103,25 @@ foreach (['direct', 'nested'] as $format) {
     }
 }
 echo "40 real HTTP service/domain read shape checks passed\n";
+
+foreach (['direct', 'nested'] as $format) {
+    foreach (['app', 'box', 'mysql'] as $kind) {
+        foreach (['parent', 'null-parent', 'name', 'service-name', 'type', 'array-name', 'valid'] as $case) {
+            $api = new EasyPanelClient($argv[1].'/inspection-identity/'.$kind.'/'.$case.'/'.$format, 'synthetic-authorization-secret');
+            $failure = null;
+            try {
+                $result = match ($kind) {
+                    'app' => $api->inspectAppService('fixture', 'target'),
+                    'box' => $api->inspectBoxService('fixture', 'target'),
+                    default => $api->inspectDatabaseService($kind, 'fixture', 'target'),
+                };
+            } catch (Throwable $exception) { $failure = $exception; }
+            if ($case === 'valid') {
+                if ($failure !== null || ($result['name'] ?? null) !== 'target') throw new RuntimeException('Matched inspection changed');
+            } elseif (!$failure instanceof RuntimeException || $failure->getMessage() !== 'EasyPanel returned a mismatched service inspection identity.') {
+                throw new RuntimeException('Foreign inspection identity accepted: '.$case.'/'.$kind);
+            }
+        }
+    }
+}
+echo "36 real HTTP inspection identity rejections and six matched controls passed\n";

@@ -141,7 +141,7 @@ final class EasyPanelClient
             'serviceName' => $serviceName,
         ]);
 
-        return $this->inspectionData($data);
+        return $this->inspectionData($data, $projectName, $serviceName, 'box');
     }
 
     public function destroyBoxService(string $projectName, string $serviceName): void
@@ -172,7 +172,7 @@ final class EasyPanelClient
             'serviceName' => $serviceName,
         ]);
 
-        return $this->inspectionData($data);
+        return $this->inspectionData($data, $projectName, $serviceName, $type);
     }
 
     public function destroyDatabaseService(string $type, string $projectName, string $serviceName): void
@@ -192,7 +192,7 @@ final class EasyPanelClient
             'serviceName' => $serviceName,
         ]);
 
-        return $this->inspectionData($data);
+        return $this->inspectionData($data, $projectName, $serviceName, 'app');
     }
 
     public function updateImageSource(string $projectName, string $serviceName, string $image): void
@@ -389,10 +389,15 @@ final class EasyPanelClient
     }
 
     /** @return array<string, mixed> */
-    private function inspectionData(mixed $data): array
+    private function inspectionData(mixed $data, string $projectName, string $serviceName, string $type): array
     {
         if (! \is_array($data) || ($data !== [] && \array_is_list($data))) {
             throw new \RuntimeException('EasyPanel returned an invalid service inspection.');
+        }
+        foreach (['projectName' => $projectName, 'serviceName' => $serviceName, 'name' => $serviceName, 'type' => $type] as $key => $expected) {
+            if (\array_key_exists($key, $data) && $data[$key] !== $expected) {
+                throw new \RuntimeException('EasyPanel returned a mismatched service inspection identity.');
+            }
         }
         return $data;
     }

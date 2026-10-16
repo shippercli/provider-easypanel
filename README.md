@@ -242,3 +242,10 @@ on one host are preserved. Raw HTTP object/array distinctions are checked before
 normalization. These are shape checks: ownership markers, expected identities,
 requested configuration, runtime state and live compatibility require separate
 verification.
+
+Inspection responses also reject contradictory optional `projectName`,
+`serviceName`, `name` or `type` fields. When present, each must exactly match the
+requested project, service and canonical service type. Diagnostics do not echo
+the returned values. Responses omitting these fields remain supported, so this
+is contradiction detection rather than independent proof of target identity.
+Ownership environment markers and live verification are still required.
