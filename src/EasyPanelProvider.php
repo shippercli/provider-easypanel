@@ -262,10 +262,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                 throw new \RuntimeException('Refusing to apply while a legacy EasyPanel project exists under the ambiguous name. Review its exact project/profile ownership and migrate it explicitly.');
             }
 
-            if (! $this->projectExists($inventory, $projectName)) {
-                $client->createProject($projectName);
-            }
-
+            $projectExists = $this->projectExists($inventory, $projectName);
             $service = $this->findService($inventory, $projectName, $serviceName);
             $existingEnvironment = '';
             if ($service !== null && ($service['type'] ?? null) !== 'app') {
@@ -280,6 +277,21 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                     || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
                     throw new \RuntimeException('Refusing to modify an EasyPanel service without Shipper ownership markers.');
                 }
+            }
+
+            $prerequisiteError = $this->planDatabaseAndWorkloadPrerequisites(
+                $client,
+                $project,
+                $projectName,
+                $inventory,
+                $this->environment($projectName, $profile, [], $existingEnvironment, $project),
+            );
+            if ($prerequisiteError !== null) {
+                throw new \RuntimeException($prerequisiteError);
+            }
+
+            if (! $projectExists) {
+                $client->createProject($projectName);
             }
 
             if ($service === null) {
