@@ -58,7 +58,8 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         try {
             $this->databaseEnvironmentPrefixes($project);
             $this->assertUniqueWorkloadNames($project);
-            $this->environment('validation', $profile, [], '', $project);
+            $applicationEnvironment = $this->environment('validation', $profile, [], '', $project);
+            $this->databaseApplicationEnvironment($project, $applicationEnvironment);
         } catch (\InvalidArgumentException $exception) {
             $errors[] = $exception->getMessage();
         }
@@ -349,6 +350,29 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
     }
 
     /** @return array<string, string> */
+    /** @return array<string, mixed> */
+    private function databaseApplicationEnvironment(object $project, string $environment): array
+    {
+        try {
+            // phpdotenv can silently discard an unfinished multiline value at EOF.
+            $probe = '__SHIPPER_ENV_END_'.\bin2hex(\random_bytes(16));
+            $available = \Dotenv\Dotenv::parse($environment."\n".$probe."=1\n");
+            if (($available[$probe] ?? null) !== '1') {
+                throw new \InvalidArgumentException('Incomplete environment input');
+            }
+            unset($available[$probe]);
+        } catch (\Throwable) {
+            throw new \InvalidArgumentException('Cannot parse the EasyPanel database application environment.');
+        }
+        foreach ($this->databaseEnvironmentPrefixes($project) as $prefix) {
+            $key = $prefix.'_PASSWORD';
+            if (\array_key_exists($key, $available) && (! \is_string($available[$key]) || $available[$key] === '')) {
+                throw new \InvalidArgumentException('Explicit EasyPanel database passwords must be nonempty strings.');
+            }
+        }
+        return $available;
+    }
+
     private function applyDatabases(EasyPanelClient $client, object $project, string $projectName, string $applicationEnvironment = ''): array
     {
         $environment = [];
@@ -356,6 +380,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             ? $project->databases()
             : [];
         $prefixes = $this->databaseEnvironmentPrefixes($project);
+        $available = $this->databaseApplicationEnvironment($project, $applicationEnvironment);
         foreach ($databases as $database) {
             if (! method_exists($database, 'name')) {
                 continue;
@@ -378,11 +403,6 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                     || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
                     throw new \RuntimeException("Refusing to reuse EasyPanel database {$serviceName} without matching Shipper ownership markers.");
                 }
-                try {
-                    $available = \Dotenv\Dotenv::parse($applicationEnvironment);
-                } catch (\Throwable) {
-                    throw new \RuntimeException('Cannot parse the application environment before reusing an EasyPanel database.');
-                }
                 $prefix = $prefixes[$database->name()];
                 if (($available[$prefix.'_DATABASE'] ?? null) !== $databaseName
                     || ($available[$prefix.'_USERNAME'] ?? null) !== $username
@@ -393,7 +413,8 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                 continue;
             }
 
-            $password = (string) ($this->config['database_password'] ?? bin2hex(random_bytes(16)));
+            $prefix = $prefixes[$database->name()];
+            $password = $available[$prefix.'_PASSWORD'] ?? (string) ($this->config['database_password'] ?? bin2hex(random_bytes(16)));
             $payload = [
                 'databaseName' => $databaseName,
                 'user' => $username,

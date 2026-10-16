@@ -45,7 +45,14 @@ The `analytics` database then supplies `ANALYTICS_DB_HOST`,
 `ANALYTICS_DB_DATABASE`, `ANALYTICS_DB_USERNAME`, and `ANALYTICS_DB_PASSWORD`.
 Configure the application to read these variables. Prefixes must be uppercase
 environment identifiers and cannot be shared by databases. Passwords are
-generated independently unless a shared `database_password` is explicitly set.
+selected from the merged application `<PREFIX>_PASSWORD` when present (for
+example `DB_PASSWORD`), then shared `database_password`, then independent
+generation. The chosen password is sent unchanged to creation and application
+delivery. Profile environment values override project/provider values; existing
+application values can also supply the password when recreating a missing
+service. Empty application passwords and malformed application environment content fail
+before database provisioning. Database names/users and host values remain
+controlled by declarations/provider settings.
 Re-apply preserves the existing application environment and does not rotate
 passwords for existing database services. An existing service's credentials
 must already be configured in the application or supplied through its configured

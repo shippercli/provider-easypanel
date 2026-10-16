@@ -21,7 +21,16 @@ class ResponsesTest(unittest.TestCase):
                 body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
                 received.append((self.path, self.headers.get('Authorization'), body))
                 procedure = self.path.rsplit('/', 1)[-1]
-                if self.path.startswith('/workload-delete/'):
+                if self.path.startswith('/database-password/'):
+                    if procedure == 'projects.listProjectsAndServices':
+                        data = {'projects': [], 'services': []}
+                    else:
+                        request = json.loads(body)['json']
+                        if procedure != 'services.mysql.createService' or request['password'] != 'literal-${PROJECT_NAME}-${PROFILE}-+%:@' or request['databaseName'] != 'main_db' or request['user'] != 'appuser':
+                            raise AssertionError('Explicit password or normalized database identity changed')
+                        data = {}
+                    status, payload = 200, json.dumps({'json': data}).encode()
+                elif self.path.startswith('/workload-delete/'):
                     kind, state = self.path.split('/')[2:4]
                     names = {'worker': 'worker-default', 'scheduler': 'scheduler', 'database': 'db-fixture'}
                     types = {'worker': 'app', 'scheduler': 'box', 'database': 'mysql'}
@@ -140,7 +149,7 @@ class ResponsesTest(unittest.TestCase):
                 result = subprocess.run(['php', str(Path(__file__).with_name('verify-responses.php')), f'http://127.0.0.1:{server.server_port}'], capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(redirected, [])
-                self.assertEqual(len(received), 239)
+                self.assertEqual(len(received), 241)
                 self.assertTrue(all(auth == 'synthetic-authorization-secret' for _, auth, _ in received))
                 self.assertEqual(sum(b'synthetic-body-secret' in body for _, _, body in received), 26)
                 for case in ['absent', 'retain-project', 'other-service', 'pending-app', 'pending-project', 'unreadable']:

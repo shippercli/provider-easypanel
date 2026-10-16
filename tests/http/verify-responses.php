@@ -175,3 +175,20 @@ foreach (['worker', 'scheduler', 'database'] as $kind) {
     }
 }
 echo "12 real HTTP worker/scheduler/database deletion verification flows passed\n";
+
+
+$passwordApi = new EasyPanelClient($argv[1].'/database-password', 'synthetic-authorization-secret');
+$passwordProvider = new \ShipperCli\ProviderEasyPanel\EasyPanelProvider(['database_password' => 'shared-fallback'], $passwordApi);
+$passwordProject = new class {
+    public function databases(): array { return [new class {
+        public function name(): string { return 'Main_DB'; }
+        public function user(): string { return 'AppUser'; }
+    }]; }
+};
+$literalPassword = 'literal-${PROJECT_NAME}-${PROFILE}-+%:@';
+$connection = (new ReflectionMethod($passwordProvider, 'applyDatabases'))->invoke($passwordProvider, $passwordApi,
+    $passwordProject, 'fixture', "DB_PASSWORD='".$literalPassword."'");
+if ($connection['DB_PASSWORD'] !== $literalPassword || $connection['DB_DATABASE'] !== 'main_db' || $connection['DB_USERNAME'] !== 'appuser') {
+    throw new RuntimeException('Explicit EasyPanel database connection changed');
+}
+echo "Literal explicit password and normalized identity passed real HTTP creation\n";
