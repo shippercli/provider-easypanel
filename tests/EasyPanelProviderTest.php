@@ -45,15 +45,15 @@ final class EasyPanelProviderTest extends TestCase
 
                 return match ($procedure) {
                     'projects.listProjectsAndServices' => [
-                        'projects' => [['name' => 'shippercli-demo-provider-preview']],
+                        'projects' => [['name' => 'shippercli-demo-provider-preview-b7806089dcff5c6cd25c']],
                         'services' => [[
-                            'projectName' => 'shippercli-demo-provider-preview',
+                            'projectName' => 'shippercli-demo-provider-preview-b7806089dcff5c6cd25c',
                             'name' => 'web',
                             'type' => 'app',
                         ]],
                     ],
                     'services.app.inspectService' => [
-                        'env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-preview",
+                        'env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-preview-b7806089dcff5c6cd25c",
                     ],
                     'domains.listDomains' => [['host' => 'preview.example.com']],
                     default => [],
@@ -95,7 +95,7 @@ final class EasyPanelProviderTest extends TestCase
             $provider->logs($this->project(), $this->profile(), 25),
         );
         self::assertSame('logs.queryServiceLogs', $calls[0][0]);
-        self::assertSame('shippercli-demo-provider-v1', $calls[0][1]['projectName']);
+        self::assertSame('shippercli-demo-provider-v1-811454f76c57a1580028', $calls[0][1]['projectName']);
         self::assertSame('web', $calls[0][1]['serviceName']);
         self::assertSame(25, $calls[0][1]['limit']);
     }
@@ -124,9 +124,9 @@ final class EasyPanelProviderTest extends TestCase
 
                 return match ($procedure) {
                     'projects.listProjectsAndServices' => [
-                        'projects' => [['name' => 'shippercli-demo-provider-v1']],
+                        'projects' => [['name' => 'shippercli-demo-provider-v1-811454f76c57a1580028']],
                         'services' => [[
-                            'projectName' => 'shippercli-demo-provider-v1',
+                            'projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028',
                             'name' => 'web',
                             'type' => 'app',
                         ]],
@@ -144,12 +144,8 @@ final class EasyPanelProviderTest extends TestCase
         self::assertSame([
             'provider' => 'easypanel',
             'state' => 'running',
-            'project' => 'shippercli-demo-provider-v1',
+            'project' => 'shippercli-demo-provider-v1-811454f76c57a1580028',
             'service' => 'web',
-            'service_state' => [
-                'status' => 'running',
-                'image' => 'example/app:latest',
-            ],
         ], $provider->status($this->project(), $this->profile()));
         self::assertSame('projects.listProjectsAndServices', $calls[0][0]);
         self::assertSame('services.app.inspectService', $calls[1][0]);
@@ -158,11 +154,14 @@ final class EasyPanelProviderTest extends TestCase
     public function test_apply_creates_and_deploys_only_the_derived_managed_resources(): void
     {
         $calls = [];
+        $savedEnvironments = [];
         $client = new EasyPanelClient(
             'https://panel.example.com',
             'token',
-            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+            transport: static function (string $procedure, array $input) use (&$savedEnvironments, &$calls): mixed {
                 $calls[] = [$procedure, $input];
+                if ($procedure === 'services.app.updateEnv') $savedEnvironments[$input['serviceName']] = $input['env'];
+                if ($procedure === 'services.app.inspectService' && array_key_exists($input['serviceName'], $savedEnvironments)) return ['env' => $savedEnvironments[$input['serviceName']]];
 
                 return match ($procedure) {
                     'projects.listProjectsAndServices' => ['projects' => [], 'services' => []],
@@ -180,40 +179,48 @@ final class EasyPanelProviderTest extends TestCase
             'services.app.createService',
             'services.app.updateSourceImage',
             'services.app.updateEnv',
+            'services.app.inspectService',
             'projects.listProjectsAndServices',
             'projects.listProjectsAndServices',
             'domains.listDomains',
             'domains.createDomain',
             'services.app.deployService',
         ], \array_column($calls, 0));
-        self::assertSame('shippercli-demo-provider-v1', $calls[1][1]['name']);
-        self::assertSame('shippercli-demo-provider-v1', $calls[2][1]['projectName']);
+        self::assertSame('shippercli-demo-provider-v1-811454f76c57a1580028', $calls[1][1]['name']);
+        self::assertSame('shippercli-demo-provider-v1-811454f76c57a1580028', $calls[2][1]['projectName']);
         self::assertStringContainsString('SHIPPERCLI_MANAGED=1', $calls[4][1]['env']);
-        self::assertStringContainsString('SHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1', $calls[4][1]['env']);
-        self::assertSame('demo.shippercli.com', $calls[8][1]['host']);
+        self::assertStringContainsString('SHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028', $calls[4][1]['env']);
+        self::assertSame('demo.shippercli.com', $calls[9][1]['host']);
     }
 
     public function test_apply_removes_an_owned_worker_removed_from_configuration(): void
     {
         $calls = [];
-        $client = new EasyPanelClient('https://panel.example.com', 'token', transport: static function (string $procedure, array $input) use (&$calls): mixed {
+        $savedEnvironments = [];
+        $removed = false;
+        $client = new EasyPanelClient('https://panel.example.com', 'token', transport: static function (string $procedure, array $input) use (&$savedEnvironments, &$calls, &$removed): mixed {
             $calls[] = [$procedure, $input];
+                if ($procedure === 'services.app.updateEnv') $savedEnvironments[$input['serviceName']] = $input['env'];
+                if ($procedure === 'services.app.inspectService' && array_key_exists($input['serviceName'], $savedEnvironments)) return ['env' => $savedEnvironments[$input['serviceName']]];
+            if ($procedure === 'services.app.destroyService') $removed = true;
 
             return match ($procedure) {
                 'projects.listProjectsAndServices' => [
-                    'projects' => [['name' => 'shippercli-demo-provider-v1']],
+                    'projects' => [['name' => 'shippercli-demo-provider-v1-811454f76c57a1580028']],
                     'services' => [
-                        ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'web', 'type' => 'app'],
-                        ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'worker-old', 'type' => 'app'],
+                        ['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'web', 'type' => 'app'],
+                        ...($removed ? [] : [['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'worker-old', 'type' => 'app']]),
                     ],
                 ],
-                'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1\nSHIPPERCLI_MANAGED_WORKER=worker-old"],
+                'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028\nSHIPPERCLI_MANAGED_WORKER=worker-old"],
                 'domains.listDomains' => [],
                 default => null,
             };
         });
         $project = new class {
-            public function name(): string { return 'provider'; }
+
+
+    public function name(): string { return 'provider'; }
             public function repository(): array { return []; }
             public function hasSection(string $section): bool { return $section === 'queues'; }
             public function queues(): array { return []; }
@@ -226,24 +233,32 @@ final class EasyPanelProviderTest extends TestCase
     public function test_apply_can_reconcile_an_owned_database_when_explicitly_enabled(): void
     {
         $calls = [];
-        $client = new EasyPanelClient('https://panel.example.com', 'token', transport: static function (string $procedure, array $input) use (&$calls): mixed {
+        $savedEnvironments = [];
+        $removed = false;
+        $client = new EasyPanelClient('https://panel.example.com', 'token', transport: static function (string $procedure, array $input) use (&$savedEnvironments, &$calls, &$removed): mixed {
             $calls[] = [$procedure, $input];
+                if ($procedure === 'services.app.updateEnv') $savedEnvironments[$input['serviceName']] = $input['env'];
+                if ($procedure === 'services.app.inspectService' && array_key_exists($input['serviceName'], $savedEnvironments)) return ['env' => $savedEnvironments[$input['serviceName']]];
+            if ($procedure === 'services.postgres.destroyService') $removed = true;
 
             return match ($procedure) {
                 'projects.listProjectsAndServices' => [
-                    'projects' => [['name' => 'shippercli-demo-provider-v1']],
+                    'projects' => [['name' => 'shippercli-demo-provider-v1-811454f76c57a1580028']],
                     'services' => [
-                        ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'web', 'type' => 'app'],
-                        ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'db-old', 'type' => 'postgres'],
+                        ['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'web', 'type' => 'app'],
+                        ...($removed ? [] : [['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'db-old', 'type' => 'postgres']]),
                     ],
                 ],
-                'services.postgres.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1"],
+                'services.postgres.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028\nSHIPPERCLI_DATABASE_CREATED=".substr(hash('sha256', json_encode(['shippercli-demo-provider-v1-811454f76c57a1580028', 'db-old'], JSON_THROW_ON_ERROR)), 0, 24)],
+                'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028"],
                 'domains.listDomains' => [],
                 default => null,
             };
         });
         $project = new class {
-            public function name(): string { return 'provider'; }
+
+
+    public function name(): string { return 'provider'; }
             public function repository(): array { return []; }
             public function hasSection(string $section): bool { return $section === 'databases'; }
             public function databases(): array { return []; }
@@ -257,15 +272,18 @@ final class EasyPanelProviderTest extends TestCase
     public function test_apply_provisions_a_configured_database_service(): void
     {
         $calls = [];
+        $environment = '';
         $client = new EasyPanelClient(
             'https://panel.example.com',
             'token',
-            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+            transport: static function (string $procedure, array $input) use (&$calls, &$environment): mixed {
                 $calls[] = [$procedure, $input];
+                if ($procedure === 'services.app.updateEnv') $environment = $input['env'];
 
                 return match ($procedure) {
                     'projects.listProjectsAndServices' => ['projects' => [], 'services' => []],
                     'domains.listDomains' => [],
+                    'services.app.inspectService' => ['env' => $environment],
                     default => null,
                 };
             },
@@ -294,20 +312,25 @@ final class EasyPanelProviderTest extends TestCase
     public function test_apply_reuses_an_existing_database_with_an_alias_type(): void
     {
         $calls = [];
+        $savedEnvironments = [];
         $client = new EasyPanelClient(
             'https://panel.example.com',
             'token',
-            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+            transport: static function (string $procedure, array $input) use (&$savedEnvironments, &$calls): mixed {
                 $calls[] = [$procedure, $input];
+                if ($procedure === 'services.app.updateEnv') $savedEnvironments[$input['serviceName']] = $input['env'];
+                if ($procedure === 'services.app.inspectService' && array_key_exists($input['serviceName'], $savedEnvironments)) return ['env' => $savedEnvironments[$input['serviceName']]];
 
                 return match ($procedure) {
                     'projects.listProjectsAndServices' => [
-                        'projects' => [['name' => 'shippercli-demo-provider-v1']],
+                        'projects' => [['name' => 'shippercli-demo-provider-v1-811454f76c57a1580028']],
                         'services' => [
-                            ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'web', 'type' => 'app'],
-                            ['projectName' => 'shippercli-demo-provider-v1', 'name' => 'db-main', 'type' => 'postgres'],
+                            ['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'web', 'type' => 'app'],
+                            ['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'db-main', 'type' => 'postgres'],
                         ],
                     ],
+                    'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028\nDB_HOST=db-main\nDB_DATABASE=main\nDB_USERNAME=shipper\nDB_PASSWORD=retained-secret"],
+                    'services.postgres.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028\nSHIPPERCLI_DATABASE_CREATED=".substr(hash('sha256', json_encode(['shippercli-demo-provider-v1-811454f76c57a1580028', 'db-main'], JSON_THROW_ON_ERROR)), 0, 24)],
                     'domains.listDomains' => [],
                     default => null,
                 };
@@ -324,16 +347,23 @@ final class EasyPanelProviderTest extends TestCase
 
         self::assertTrue((new EasyPanelProvider($this->config(), $client))->apply($project, $this->profile()));
         self::assertNotContains('services.postgres.createService', array_column($calls, 0));
+        $updates = array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'services.app.updateEnv'));
+        self::assertCount(1, $updates);
+        self::assertStringContainsString('DB_PASSWORD=retained-secret', $updates[0][1]['env']);
+        self::assertStringContainsString('DB_HOST=db-main', $updates[0][1]['env']);
     }
 
     public function test_apply_translates_named_cron_frequency_to_an_easy_panel_expression(): void
     {
         $calls = [];
+        $savedEnvironments = [];
         $client = new EasyPanelClient(
             'https://panel.example.com',
             'token',
-            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+            transport: static function (string $procedure, array $input) use (&$savedEnvironments, &$calls): mixed {
                 $calls[] = [$procedure, $input];
+                if (in_array($procedure, ['services.app.updateEnv', 'services.box.updateEnv'], true)) $savedEnvironments[$input['serviceName']] = $input['env'];
+                if (in_array($procedure, ['services.app.inspectService', 'services.box.inspectService'], true) && array_key_exists($input['serviceName'], $savedEnvironments)) return ['env' => $savedEnvironments[$input['serviceName']]];
 
                 return match ($procedure) {
                     'projects.listProjectsAndServices' => ['projects' => [], 'services' => []],
@@ -368,6 +398,36 @@ final class EasyPanelProviderTest extends TestCase
         self::assertFalse($cloneCalls[0][1]['private']);
     }
 
+    public function test_apply_refuses_an_unmanaged_service_before_any_mutation(): void
+    {
+        $calls = [];
+        $client = new EasyPanelClient(
+            'https://panel.example.com',
+            'token',
+            transport: static function (string $procedure, array $input) use (&$calls): mixed {
+                $calls[] = [$procedure, $input];
+
+                return match ($procedure) {
+                    'projects.listProjectsAndServices' => [
+                        'projects' => [['name' => 'shippercli-demo-provider-v1-811454f76c57a1580028']],
+                        'services' => [[
+                            'projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028',
+                            'name' => 'web',
+                            'type' => 'app',
+                        ]],
+                    ],
+                    'services.app.inspectService' => ['env' => 'APP_ENV=production'],
+                    default => null,
+                };
+            },
+        );
+        $provider = new EasyPanelProvider($this->config(), $client);
+
+        self::assertFalse($provider->apply($this->project(), $this->profile()));
+        self::assertStringContainsString('without Shipper ownership markers', $provider->getLastError());
+        self::assertSame(['projects.listProjectsAndServices', 'services.app.inspectService'], \array_column($calls, 0));
+    }
+
     public function test_destroy_refuses_a_service_without_ownership_markers(): void
     {
         $calls = [];
@@ -379,9 +439,9 @@ final class EasyPanelProviderTest extends TestCase
 
                 return match ($procedure) {
                     'projects.listProjectsAndServices' => [
-                        'projects' => [['name' => 'shippercli-demo-provider-v1']],
+                        'projects' => [['name' => 'shippercli-demo-provider-v1-811454f76c57a1580028']],
                         'services' => [[
-                            'projectName' => 'shippercli-demo-provider-v1',
+                            'projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028',
                             'name' => 'web',
                             'type' => 'app',
                         ]],
@@ -402,19 +462,20 @@ final class EasyPanelProviderTest extends TestCase
     public function test_destroy_removes_only_a_marked_service_and_then_its_empty_managed_project(): void
     {
         $calls = [];
-        $listCount = 0;
+        $appDeleted = $projectDeleted = false;
         $client = new EasyPanelClient(
             'https://panel.example.com',
             'token',
-            transport: static function (string $procedure, array $input) use (&$calls, &$listCount): mixed {
+            transport: static function (string $procedure, array $input) use (&$calls, &$appDeleted, &$projectDeleted): mixed {
                 $calls[] = [$procedure, $input];
+                if ($procedure === 'services.app.destroyService') $appDeleted = true;
+                if ($procedure === 'projects.destroyProject') $projectDeleted = true;
                 if ($procedure === 'projects.listProjectsAndServices') {
-                    $listCount++;
 
                     return [
-                        'projects' => [['name' => 'shippercli-demo-provider-v1']],
-                        'services' => $listCount === 1 ? [[
-                            'projectName' => 'shippercli-demo-provider-v1',
+                        'projects' => $projectDeleted ? [] : [['name' => 'shippercli-demo-provider-v1-811454f76c57a1580028']],
+                        'services' => !$appDeleted ? [[
+                            'projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028',
                             'name' => 'web',
                             'type' => 'app',
                         ]] : [],
@@ -422,7 +483,7 @@ final class EasyPanelProviderTest extends TestCase
                 }
 
                 if ($procedure === 'services.app.inspectService') {
-                    return ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1"];
+                    return ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028"];
                 }
 
                 return null;

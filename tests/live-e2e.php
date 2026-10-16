@@ -14,7 +14,7 @@ if (! is_string($url) || $url === '' || ! is_string($token) || $token === '') {
     throw new RuntimeException('EASYPANEL_URL and EASYPANEL_AUTH_TOKEN are required.');
 }
 
-$expectedProject = 'shippercli-demo-provider-v1';
+$expectedProject = 'shippercli-demo-provider-v1-811454f76c57a1580028';
 $expectedService = 'web';
 $client = new EasyPanelClient($url, $token, timeout: 45);
 $provider = new EasyPanelProvider([
