@@ -43,6 +43,25 @@ if (count($argv) !== 1) {
     throw new InvalidArgumentException('Unknown probe arguments.');
 }
 
+$request = static function (string $route, ?array $payload = null) use ($url, $token): string {
+    $handle = curl_init(rtrim($url, '/').'/api/'.$route);
+    curl_setopt_array($handle, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_PROTOCOLS_STR => 'HTTPS',
+        CURLOPT_TIMEOUT => 20,
+        CURLOPT_HTTPHEADER => ['Authorization: Bearer '.$token, 'Content-Type: application/json'],
+    ]);
+    if ($payload !== null) {
+        curl_setopt($handle, CURLOPT_POSTFIELDS, json_encode($payload, JSON_THROW_ON_ERROR));
+    }
+    $body = curl_exec($handle);
+    $status = curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+    if (! is_string($body) || $status < 200 || $status >= 300) {
+        throw new RuntimeException('Public EasyPanel '.$route.' failed (HTTP '.$status.').');
+    }
+    return $body;
+};
+
 $project = 'shippercli-create-probe-'.bin2hex(random_bytes(8));
 $service = 'probe';
 $marker = 'SHIPPERCLI_MANAGED_PROJECT='.$project;
@@ -64,27 +83,41 @@ try {
 }
 
 try {
-    $client->call('services.app.createService', [
+    $request('createAppService', [
         'projectName' => $project,
         'serviceName' => $service,
         'env' => $marker,
     ]);
-    $details = $client->inspectAppService($project, $service);
+    $details = json_decode($request('inspectAppService?'.http_build_query([
+        'projectName' => $project,
+        'serviceName' => $service,
+    ])), true);
     if (! is_string($details['env'] ?? null)) {
         throw new RuntimeException('The app inspection did not return a valid environment.');
     }
     $persisted = in_array($marker, preg_split('/\R/', $details['env']) ?: [], true);
 } finally {
-    foreach ($client->listProjectsAndServices()['services'] as $entry) {
+    $inventory = $client->listProjectsAndServices();
+    foreach ($inventory['services'] as $entry) {
         if ($entry['projectName'] === $project && ($entry['name'] !== $service || $entry['type'] !== 'app')) {
             throw new RuntimeException('Disposable project contains an unexpected service. Manual cleanup required.');
         }
     }
-    $client->destroyProject($project);
-    if (in_array($project, array_column($client->listProjectsAndServices()['projects'], 'name'), true)) {
-        throw new RuntimeException('Disposable project still exists after cleanup.');
+    if (in_array($project, array_column($inventory['projects'], 'name'), true)) {
+        $deletionError = null;
+        try {
+            $request('destroyProject', ['name' => $project]);
+        } catch (RuntimeException $error) {
+            $deletionError = $error;
+        }
+        if (in_array($project, array_column($client->listProjectsAndServices()['projects'], 'name'), true)) {
+            throw $deletionError ?? new RuntimeException('Disposable project still exists after cleanup.');
+        }
     }
     echo "Disposable project cleanup verified.\n";
 }
 
-echo $persisted ? "Environment marker persisted.\n" : "Environment marker ignored.\n";
+if (! $persisted) {
+    throw new RuntimeException('Environment marker was not persisted at creation.');
+}
+echo "Environment marker persisted.\n";
