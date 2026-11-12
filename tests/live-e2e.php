@@ -14,7 +14,8 @@ if (! is_string($url) || $url === '' || ! is_string($token) || $token === '') {
     throw new RuntimeException('EASYPANEL_URL and EASYPANEL_AUTH_TOKEN are required.');
 }
 
-$disposable = $argv === [$argv[0], '--disposable'];
+$withDatabase = $argv === [$argv[0], '--disposable-database'];
+$disposable = $withDatabase || $argv === [$argv[0], '--disposable'];
 if (! $disposable && count($argv) !== 1) {
     throw new InvalidArgumentException('Unknown live test arguments.');
 }
@@ -42,8 +43,8 @@ $provider = new EasyPanelProvider([
     ],
 ], $client);
 
-$project = new class($name) {
-    public function __construct(private readonly string $name) {}
+$project = new class($name, $withDatabase) {
+    public function __construct(private readonly string $name, private readonly bool $withDatabase) {}
 
     public function name(): string
     {
@@ -54,6 +55,15 @@ $project = new class($name) {
     public function repository(): array
     {
         return [];
+    }
+
+    public function databases(): array
+    {
+        return $this->withDatabase ? [new class {
+            public function name(): string { return 'fixture'; }
+            public function user(): string { return 'fixture'; }
+            public function type(): string { return 'mysql'; }
+        }] : [];
     }
 };
 
@@ -191,6 +201,25 @@ try {
         }
         echo "Provider status: {$status['state']}\n";
 
+        $connection = static function () use ($client, $expectedProject, $expectedService): array {
+            $app = $client->inspectAppService($expectedProject, $expectedService);
+            try {
+                $values = \Dotenv\Dotenv::parse($app['env'] ?? '');
+            } catch (\Throwable) {
+                throw new RuntimeException('Unable to parse the disposable application environment.');
+            }
+            $keys = array_flip(['DB_HOST', 'DB_DATABASE', 'DB_USERNAME', 'DB_PASSWORD']);
+            $connection = array_intersect_key($values, $keys);
+            if (count($connection) !== count($keys) || in_array('', $connection, true)
+                || ($connection['DB_HOST'] ?? null) !== 'db-fixture'
+                || ($connection['DB_DATABASE'] ?? null) !== 'fixture'
+                || ($connection['DB_USERNAME'] ?? null) !== 'fixture') {
+                throw new RuntimeException('The application database environment did not match the disposable declaration.');
+            }
+            return $connection;
+        };
+        $originalConnection = $withDatabase ? $connection() : [];
+
         if (! $provider->apply($project, $profile)) {
             throw new RuntimeException('Redeploy failed: '.$provider->getLastError());
         }
@@ -203,6 +232,12 @@ try {
             throw new RuntimeException('Redeploy did not preserve exactly one automatic HTTPS binding.');
         }
         echo "Redeploy accepted and endpoint still serves nginx.\n";
+        if ($withDatabase) {
+            if ($originalConnection !== $connection() || ! $client->hasRunningAppContainer($expectedProject, 'db-fixture')) {
+                throw new RuntimeException('The database runtime or retained application credentials could not be verified.');
+            }
+            echo "Disposable MySQL runtime and preserved application credentials verified.\n";
+        }
 
         $logs = $provider->logs($project, $profile, 20);
         if ($logs === []) {
@@ -212,7 +247,12 @@ try {
     }
 } finally {
     if ($disposable) {
-        if (! $provider->destroy($project, $profile) || $projectExists()) {
+        // Destroy reconciles database declarations, so omit the disposable database from desired state.
+        $cleanupProject = new class($name) {
+            public function __construct(private readonly string $name) {}
+            public function name(): string { return $this->name; }
+        };
+        if (! $provider->destroy($cleanupProject, $profile) || $projectExists()) {
             throw new RuntimeException('Disposable lifecycle cleanup failed: '.$provider->getLastError());
         }
         echo "Disposable lifecycle project cleanup verified.\n";

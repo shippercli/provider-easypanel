@@ -7,6 +7,10 @@ on:
         description: Deploy and destroy an isolated EasyPanel app
         type: boolean
         default: false
+      include-database:
+        description: Include a MySQL service in the disposable lifecycle
+        type: boolean
+        default: false
       probe-create-env:
         description: Check ownership marker persistence on a disposable app
         type: boolean
@@ -118,4 +122,7 @@ jobs:
           php-version: '8.3'
           coverage: none
       - run: composer install --no-interaction --prefer-dist
-      - run: php tests/live-e2e.php --disposable
+      - if: "!inputs.include-database"
+        run: php tests/live-e2e.php --disposable
+      - if: inputs.include-database
+        run: php tests/live-e2e.php --disposable-database
