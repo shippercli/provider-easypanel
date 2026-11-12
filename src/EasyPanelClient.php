@@ -260,14 +260,17 @@ final class EasyPanelClient
 
     public function updateDockerfileSource(string $projectName, string $serviceName, string $dockerfile): void
     {
-        try {
-            $this->call('services.app.updateSourceDockerfile', [
-                'projectName' => $projectName,
-                'serviceName' => $serviceName,
-                'dockerfile' => $dockerfile,
-            ]);
-        } catch (\RuntimeException $exception) {
-            throw new \RuntimeException('EasyPanel Dockerfile source update failed: '.$exception->getMessage(), previous: $exception);
+        $result = $this->call('services.app.updateSourceDockerfile', [
+            'projectName' => $projectName,
+            'serviceName' => $serviceName,
+            'dockerfile' => $dockerfile,
+        ]);
+        if ($result instanceof \stdClass && (array) $result === []) {
+            $inspection = $this->inspectAppService($projectName, $serviceName);
+            if (($inspection['source']['type'] ?? null) !== 'dockerfile'
+                || ($inspection['source']['dockerfile'] ?? null) !== $dockerfile) {
+                throw new \RuntimeException('EasyPanel Dockerfile source update could not be verified.');
+            }
         }
     }
 
@@ -547,6 +550,7 @@ final class EasyPanelClient
             'projects.destroyProject',
             'services.app.deployService',
             'services.app.updateSourceImage',
+            'services.app.updateSourceDockerfile',
             'services.app.updateEnv',
             'services.app.destroyService',
         ], true)) {

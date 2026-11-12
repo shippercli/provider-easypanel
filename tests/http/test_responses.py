@@ -89,6 +89,15 @@ class ResponsesTest(unittest.TestCase):
                         if case == 'different':
                             data['image'] = 'nginx:alpine'
                         payload = json.dumps({'json': data}).encode()
+                elif self.path.startswith('/dockerfile-ack/'):
+                    case = self.path.split('/')[2]
+                    status, payload = 200, b'{}'
+                    if procedure == 'services.app.inspectService':
+                        data = {'source': {
+                            'type': 'image' if case == 'inactive' else 'dockerfile',
+                            'dockerfile': 'FROM alpine' if case == 'different' else 'FROM nginx:alpine',
+                        }}
+                        payload = json.dumps({'json': data}).encode()
                 elif self.path.startswith('/cleanup/'):
                     case, project = self.path.split('/')[2:4]
                     state = cleanup_states.setdefault(case, {'app': False, 'project': False})
@@ -215,7 +224,7 @@ class ResponsesTest(unittest.TestCase):
                     self.assertTrue(path.endswith('/api/createAppService'))
                     self.assertEqual(auth, 'Bearer synthetic-authorization-secret')
                     self.assertEqual(json.loads(body), {'projectName': 'fixture', 'serviceName': 'web', 'env': 'SHIPPERCLI_MANAGED=1'})
-                self.assertEqual(len(received), 292)
+                self.assertEqual(len(received), 298)
                 runtime_requests = [(path, auth) for path, auth, _ in received if '/getDockerContainers?' in path]
                 self.assertEqual(len(runtime_requests), 7)
                 self.assertTrue(all(auth == 'Bearer synthetic-authorization-secret' for _, auth in runtime_requests))

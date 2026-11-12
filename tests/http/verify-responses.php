@@ -45,6 +45,19 @@ foreach (['matching', 'different', 'unrelated'] as $case) {
     }
 }
 
+foreach (['matching', 'different', 'inactive'] as $case) {
+    $api = new EasyPanelClient($argv[1].'/dockerfile-ack/'.$case, 'synthetic-authorization-secret');
+    $failed = false;
+    try {
+        $api->updateDockerfileSource('fixture', 'web', 'FROM nginx:alpine');
+    } catch (RuntimeException) {
+        $failed = true;
+    }
+    if ($failed !== ($case !== 'matching')) {
+        throw new RuntimeException('Unexpected Dockerfile source acknowledgement result: '.$case);
+    }
+}
+
 foreach (['matching', 'missing', 'wrong-port', 'wrong-protocol'] as $case) {
     $api = new EasyPanelClient($argv[1].'/domain-ack/'.$case, 'synthetic-authorization-secret');
     $failed = false;
