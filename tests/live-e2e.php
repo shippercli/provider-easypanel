@@ -231,6 +231,32 @@ try {
         }
         echo "Provider status: {$status['state']}\n";
 
+        $query = http_build_query(['service' => $expectedProject.'_'.$expectedService]);
+        $handle = curl_init(rtrim($url, '/').'/api/getDockerContainers?'.$query);
+        if ($handle === false) {
+            throw new RuntimeException('Unable to initialize the runtime inventory request.');
+        }
+        curl_setopt_array($handle, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 20,
+            CURLOPT_PROTOCOLS_STR => 'HTTPS',
+            CURLOPT_HTTPHEADER => ['Authorization: Bearer '.$token],
+        ]);
+        $response = curl_exec($handle);
+        $httpStatus = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+        unset($handle);
+        $containers = $httpStatus === 200 && is_string($response) ? json_decode($response) : null;
+        printf(
+            "Disposable runtime inventory: HTTP %d, shape=%s, list_count=%d, object_array_counts=%s\n",
+            $httpStatus,
+            gettype($containers),
+            is_array($containers) ? count($containers) : 0,
+            json_encode($containers instanceof stdClass ? array_values(array_map(
+                'count',
+                array_filter(get_object_vars($containers), 'is_array'),
+            )) : [], JSON_THROW_ON_ERROR),
+        );
+
         if (! $provider->apply($project, $profile)) {
             throw new RuntimeException('Redeploy failed: '.$provider->getLastError());
         }
