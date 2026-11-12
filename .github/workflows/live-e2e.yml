@@ -102,8 +102,7 @@ jobs:
       (inputs.source != 'github' || (!inputs.worker && !inputs.scheduler)) &&
       (inputs.database == 'none' ||
        (!inputs.worker && !inputs.scheduler && inputs.source == 'image')) &&
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/easypanel-redis-release' ||
-       github.ref == 'refs/heads/codex/easypanel-published-databases')
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/easypanel-redis-release')
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
