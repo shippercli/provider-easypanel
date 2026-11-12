@@ -69,6 +69,18 @@ jobs:
             "${EASYPANEL_URL%/}/api/listProjects")
           echo "Public inventory HTTP status: ${response%% *}"
           [[ "$response" == "200 application/json"* ]]
+      - name: Check the configured service domain shape
+        run: |
+          set -o pipefail
+          curl --disable --silent --fail --max-time 20 --proto '=https' \
+            --header "Authorization: Bearer $EASYPANEL_AUTH_TOKEN" \
+            "${EASYPANEL_URL%/}/api/getServiceDomain" \
+            | jq -c 'if type == "object" then {
+                shape: type,
+                custom_present: (.customServiceDomain | type == "string" and length > 0),
+                generated_present: (.generatedServiceDomain | type == "string" and length > 0),
+                nonempty_string_fields: ([.[] | strings | select(length > 0)] | length)
+              } else {shape: type} end' 2>/dev/null
 
   probe-create-env:
     if: github.event_name == 'workflow_dispatch' && !inputs.check-public-api && !inputs.disposable-lifecycle && (inputs.probe-create-env || inputs.recover-failed-probe) && github.ref == 'refs/heads/codex/easypanel-create-probe'
