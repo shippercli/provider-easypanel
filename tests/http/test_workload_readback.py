@@ -36,7 +36,7 @@ class WorkloadReadbackTest(unittest.TestCase):
 
                 if procedure == 'projects.listProjectsAndServices':
                     data = {'projects': [{'name': project}], 'services': [
-                        {'projectName': project, 'name': 'web', 'type': 'app'},
+                        {'projectName': project, 'name': 'app', 'type': 'app'},
                         {'projectName': project, 'name': target, 'type': 'app' if workload == 'worker' else 'box'}]}
                 elif procedure.endswith('.inspectService'):
                     service = body['serviceName']
