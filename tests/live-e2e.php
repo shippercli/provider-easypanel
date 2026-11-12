@@ -42,7 +42,10 @@ $provider = new EasyPanelProvider([
     'auth_token' => $token,
     'managed_prefix' => $prefix,
     'service_name' => $expectedService,
-    'source' => [
+    'source' => $withDatabase ? [
+        'type' => 'dockerfile',
+        'dockerfile' => file_get_contents(__DIR__.'/mysql-probe.Dockerfile'),
+    ] : [
         'type' => 'image',
         'image' => 'nginx:alpine',
     ],
@@ -188,9 +191,10 @@ try {
         throw new RuntimeException('The Shipper test service has no matching HTTPS binding.');
     }
 
-    $waitForNginx = static function () use ($domainHost): void {
+    $waitForApp = static function () use ($domainHost, $withDatabase): void {
         $ready = false;
-        for ($attempt = 1; $attempt <= 18; $attempt++) {
+        $deadline = hrtime(true) + ($withDatabase ? 150 : 90) * 1_000_000_000;
+        while (($remainingMs = intdiv($deadline - hrtime(true), 1_000_000)) > 0) {
             $handle = curl_init('https://'.$domainHost.'/');
             if ($handle === false) {
                 throw new RuntimeException('Unable to initialize the demo readiness request.');
@@ -198,28 +202,38 @@ try {
 
             curl_setopt_array($handle, [
                 CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT => 15,
+                CURLOPT_TIMEOUT_MS => min(15_000, $remainingMs),
                 CURLOPT_PROTOCOLS_STR => 'HTTPS',
             ]);
             $body = curl_exec($handle);
             $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
             unset($handle);
 
-            if ($status === 200 && is_string($body) && str_contains($body, '<title>Welcome to nginx!</title>')) {
+            if ($status === 200 && is_string($body) && ($withDatabase
+                ? $body === 'shippercli-mysql-query-ok'
+                : str_contains($body, '<title>Welcome to nginx!</title>'))) {
                 $ready = true;
                 break;
             }
 
-            sleep(5);
+            $remainingUs = intdiv($deadline - hrtime(true), 1_000);
+            if ($remainingUs > 0) {
+                usleep(min(5_000_000, $remainingUs));
+            }
         }
 
         if (! $ready) {
-            throw new RuntimeException('The Shipper demo service did not become ready.');
+            throw new RuntimeException($withDatabase
+                ? 'The disposable application did not confirm a successful MySQL query over HTTPS.'
+                : 'The Shipper demo service did not become ready.');
         }
     };
-    $waitForNginx();
+    $waitForApp();
 
     echo "EasyPanel demo deployment is ready.\n";
+    if ($withDatabase) {
+        echo "The deployed application authenticated to MySQL and ran SELECT 1.\n";
+    }
 
     if ($disposable) {
         $status = $provider->status($project, $profile);
@@ -250,7 +264,7 @@ try {
         if (! $provider->apply($project, $profile)) {
             throw new RuntimeException('Redeploy failed: '.$provider->getLastError());
         }
-        $waitForNginx();
+        $waitForApp();
         $matchingDomains = array_filter(
             $client->listDomains($expectedProject, $expectedService),
             static fn (array $binding): bool => strcasecmp($binding['host'], $domainHost) === 0,
@@ -258,7 +272,7 @@ try {
         if (count($matchingDomains) !== 1) {
             throw new RuntimeException('Redeploy did not preserve exactly one automatic HTTPS binding.');
         }
-        echo "Redeploy accepted and endpoint still serves nginx.\n";
+        echo "Redeploy accepted and the HTTPS endpoint remains ready.\n";
         if ($withDatabase) {
             if ($originalConnection !== $connection() || ! $client->hasRunningAppContainer($expectedProject, 'db-fixture')) {
                 throw new RuntimeException('The database runtime or retained application credentials could not be verified.');
