@@ -126,7 +126,7 @@ $project = new class($name, $worker, $scheduler, $schedulerCommand, $database) {
         return $this->database !== 'none' ? [new class($this->database) {
             public function __construct(private readonly string $type) {}
             public function name(): string { return 'fixture'; }
-            public function user(): string { return $this->type === 'redis' ? 'default' : 'fixture'; }
+            public function user(): string { return 'fixture'; }
             public function type(): string { return $this->type; }
         }] : [];
     }

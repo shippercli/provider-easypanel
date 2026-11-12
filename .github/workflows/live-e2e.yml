@@ -65,7 +65,7 @@ jobs:
          github.ref == 'refs/heads/codex/easypanel-public-git' ||
          github.ref == 'refs/heads/codex/easypanel-worker-live' ||
          github.ref == 'refs/heads/codex/easypanel-scheduler-live' ||
-         github.ref == 'refs/heads/codex/easypanel-datastores-live')))
+         github.ref == 'refs/heads/codex/easypanel-redis-default')))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:

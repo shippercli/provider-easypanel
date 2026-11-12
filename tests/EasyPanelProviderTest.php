@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ShipperCli\ProviderEasyPanel\Tests;
 
+use PHPUnit\Framework\Attributes\TestWith;
 use PHPUnit\Framework\TestCase;
 use ShipperCli\Contracts\CapabilityManifest;
 use ShipperCli\Contracts\DeploymentLogsProviderInterface;
@@ -389,14 +390,16 @@ final class EasyPanelProviderTest extends TestCase
         self::assertStringContainsString('DB_PASSWORD=', $environmentCalls[0][1]['env']);
     }
 
-    public function test_apply_reuses_an_existing_database_with_an_alias_type(): void
+    #[TestWith(['postgresql', 'postgres', 'shipper'])]
+    #[TestWith(['redis', 'redis', 'default'])]
+    public function test_apply_reuses_an_existing_database(string $type, string $serviceType, string $expectedUsername): void
     {
         $calls = [];
         $savedEnvironments = [];
         $client = new EasyPanelClient(
             'https://panel.example.com',
             'token',
-            transport: static function (string $procedure, array $input) use (&$savedEnvironments, &$calls): mixed {
+            transport: static function (string $procedure, array $input) use (&$savedEnvironments, &$calls, $serviceType): mixed {
                 $calls[] = [$procedure, $input];
                 if ($procedure === 'services.app.updateEnv') $savedEnvironments[$input['serviceName']] = $input['env'];
                 if ($procedure === 'services.app.inspectService' && array_key_exists($input['serviceName'], $savedEnvironments)) return ['env' => $savedEnvironments[$input['serviceName']]];
@@ -406,30 +409,33 @@ final class EasyPanelProviderTest extends TestCase
                         'projects' => [['name' => 'shippercli-demo-provider-v1-811454f76c57a1580028']],
                         'services' => [
                             ['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'web', 'type' => 'app'],
-                            ['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'db-main', 'type' => 'postgres'],
+                            ['projectName' => 'shippercli-demo-provider-v1-811454f76c57a1580028', 'name' => 'db-main', 'type' => $serviceType],
                         ],
                     ],
                     'services.app.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028\nDB_HOST=db-main\nDB_DATABASE=main\nDB_USERNAME=shipper\nDB_PASSWORD=retained-secret"],
-                    'services.postgres.inspectService' => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028\nSHIPPERCLI_DATABASE_CREATED=".substr(hash('sha256', json_encode(['shippercli-demo-provider-v1-811454f76c57a1580028', 'db-main'], JSON_THROW_ON_ERROR)), 0, 24)],
+                    "services.{$serviceType}.inspectService" => ['env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028\nSHIPPERCLI_DATABASE_CREATED=".substr(hash('sha256', json_encode(['shippercli-demo-provider-v1-811454f76c57a1580028', 'db-main'], JSON_THROW_ON_ERROR)), 0, 24)],
                     'domains.listDomains' => [],
                     default => null,
                 };
             },
         );
-        $project = new class {
+        $project = new class($type) {
+            public function __construct(private readonly string $type) {}
             public function name(): string { return 'provider'; }
             public function repository(): array { return []; }
-            public function databases(): array { return [new class {
+            public function databases(): array { return [new class($this->type) {
+                public function __construct(private readonly string $type) {}
                 public function name(): string { return 'main'; }
-                public function type(): string { return 'postgresql'; }
+                public function type(): string { return $this->type; }
             }]; }
         };
 
         self::assertTrue((new EasyPanelProvider($this->config(), $client))->apply($project, $this->profile()));
-        self::assertNotContains('services.postgres.createService', array_column($calls, 0));
+        self::assertNotContains("services.{$serviceType}.createService", array_column($calls, 0));
         $updates = array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'services.app.updateEnv'));
         self::assertCount(1, $updates);
         self::assertStringContainsString('DB_PASSWORD=retained-secret', $updates[0][1]['env']);
+        self::assertSame($expectedUsername, \Dotenv\Dotenv::parse($updates[0][1]['env'])['DB_USERNAME']);
         self::assertStringContainsString('DB_HOST=db-main', $updates[0][1]['env']);
     }
 
