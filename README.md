@@ -192,7 +192,17 @@ Managed project names append the first 20 hexadecimal characters of the SHA-256
 hash of the JSON-encoded `[project-name, profile-name]` pair (PHP `json_encode`
 with `JSON_THROW_ON_ERROR`). This distinguishes names that normalize to the same
 slug or have ambiguous hyphen boundaries. Ownership markers use the complete
-scoped project name.
+scoped project name. For the `preview` profile, which requires an explicit domain, the
+normalized hostname is the third element of the hashed array. Use a unique
+lowercase hostname per pull request, such as `pr-${GITHUB_PR_NUMBER}.preview.example.com`,
+and keep that hostname stable when redeploying. Orphan cleanup identifies these
+projects by their ownership markers and matching hostname. Review and remove
+previews with additional hostnames manually to avoid deleting another route.
+
+If you deployed previews with an earlier release, review the original shared
+project, move or retire its preview bindings, and remove or rename the old
+project before applying the new preview configuration. Automated orphan cleanup
+skips the original shared project.
 
 Legacy names without this suffix require a separate cutover. Apply
 refuses to create a replacement while the legacy project exists. Destroy refuses

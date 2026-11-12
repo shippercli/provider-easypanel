@@ -12,7 +12,7 @@ final class ApplyOwnershipPreflightTest extends TestCase
 {
     public function testApplyChecksExistingDatabaseAndWorkerOwnershipBeforeCreatingResources(): void
     {
-        $projectName = 'shipper-api-preview-'.substr(hash('sha256', json_encode(['api', 'preview'], JSON_THROW_ON_ERROR)), 0, 20);
+        $projectName = 'shipper-api-staging-'.substr(hash('sha256', json_encode(['api', 'staging'], JSON_THROW_ON_ERROR)), 0, 20);
 
         foreach (['database', 'worker'] as $collision) {
             $calls = [];
@@ -58,7 +58,7 @@ final class ApplyOwnershipPreflightTest extends TestCase
             };
             $profile = new class
             {
-                public function name(): string { return 'preview'; }
+                public function name(): string { return 'staging'; }
             };
             $provider = new EasyPanelProvider([
                 'url' => 'https://panel.example.test',

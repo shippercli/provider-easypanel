@@ -11,7 +11,7 @@ final class PlanResourcePrerequisitesTest extends TestCase
     public function testPlanBlocksDatabaseAndWorkerCollisionsBeforeAnyMutation(): void
     {
         foreach (['database-wrong-type', 'database-unowned', 'worker-wrong-type', 'worker-unowned'] as $mode) {
-            $projectName = 'shipper-api-preview-'.substr(hash('sha256', json_encode(['api', 'preview'], JSON_THROW_ON_ERROR)), 0, 20);
+            $projectName = 'shipper-api-staging-'.substr(hash('sha256', json_encode(['api', 'staging'], JSON_THROW_ON_ERROR)), 0, 20);
             $calls = [];
             $service = match ($mode) {
                 'database-wrong-type', 'database-unowned' => ['projectName' => $projectName, 'name' => 'db-main', 'type' => $mode === 'database-wrong-type' ? 'postgres' : 'mysql'],
@@ -51,7 +51,7 @@ final class PlanResourcePrerequisitesTest extends TestCase
                 'source' => ['type' => 'image', 'image' => 'nginx:alpine'],
             ], $client);
 
-            $plan = $provider->plan($project, new class { public function name(): string { return 'preview'; } });
+            $plan = $provider->plan($project, new class { public function name(): string { return 'staging'; } });
 
             self::assertTrue($plan['blocked'], $mode);
             self::assertCount(1, $plan['actions']);
@@ -65,7 +65,7 @@ final class PlanResourcePrerequisitesTest extends TestCase
 
     public function testPlanBlocksLegacyDatabaseBeforeAnyMutation(): void
     {
-        $projectName = 'shipper-api-preview-'.substr(hash('sha256', json_encode(['api', 'preview'], JSON_THROW_ON_ERROR)), 0, 20);
+        $projectName = 'shipper-api-staging-'.substr(hash('sha256', json_encode(['api', 'staging'], JSON_THROW_ON_ERROR)), 0, 20);
         $calls = [];
         $client = new EasyPanelClient('https://panel.example.com', 'token', transport: static function (string $procedure, array $input) use (&$calls, $projectName): array {
             $calls[] = $procedure;
@@ -86,7 +86,7 @@ final class PlanResourcePrerequisitesTest extends TestCase
             'url' => 'https://panel.example.com', 'auth_token' => 'token',
             'source' => ['type' => 'image', 'image' => 'nginx:alpine'],
         ], $client);
-        $profile = new class { public function name(): string { return 'preview'; } };
+        $profile = new class { public function name(): string { return 'staging'; } };
         $plan = $provider->plan($project, $profile);
         self::assertTrue($plan['blocked']);
         self::assertStringContainsString('cannot safely adopt', $plan['actions'][0]);

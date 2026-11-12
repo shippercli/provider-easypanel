@@ -13,13 +13,12 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
 {
     private const MANAGED_MARKER = 'SHIPPERCLI_MANAGED=1';
 
+    private const PREVIEW_DOMAIN_ERROR = 'EasyPanel preview requires a concrete hostname.';
+
     /** @var array<string, mixed> */
     private readonly array $config;
 
     private ?EasyPanelClient $client;
-
-    /** @var array<int, array{project: string, service: string}> */
-    private array $previewSiteTargets = [];
 
     private string $lastError = '';
 
@@ -77,7 +76,9 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         }
 
         $domain = $this->profileValue($profile, 'domain');
-        if ($domain !== null && $domain !== '' && $this->normalizeDomain($domain) === null) {
+        if ($this->profileName($profile) === 'preview' && $this->normalizeDomain($domain) === null) {
+            $errors[] = self::PREVIEW_DOMAIN_ERROR;
+        } elseif ($domain !== null && $domain !== '' && $this->normalizeDomain($domain) === null) {
             $errors[] = 'EasyPanel profile domain must be a valid hostname or URL.';
         }
 
@@ -99,7 +100,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                 $client = $this->getClient();
                 $inventory = $client->listProjectsAndServices();
                 $existingEnvironment = '';
-                if ($this->projectExists($inventory, $this->legacyManagedProjectName($project, $profile))) {
+                if ($this->hasLegacyTarget($inventory, $project, $profile)) {
                     $blocked = 'A legacy EasyPanel project requires explicit ownership review and migration.';
                 } else {
                     $service = $this->findService($inventory, $projectName, $serviceName);
@@ -257,8 +258,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             $client = $this->getClient();
             $inventory = $client->listProjectsAndServices();
 
-            $legacyName = $this->legacyManagedProjectName($project, $profile);
-            if ($this->projectExists($inventory, $legacyName)) {
+            if ($this->hasLegacyTarget($inventory, $project, $profile)) {
                 throw new \RuntimeException('Refusing to apply while a legacy EasyPanel project exists under the ambiguous name. Review its exact project/profile ownership and migrate it explicitly.');
             }
 
@@ -350,6 +350,18 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
 
     public function destroy(object $project, object $profile): bool
     {
+        $domain = $this->profileValue($profile, 'domain');
+        if ($this->profileName($profile) === 'preview' && $this->normalizeDomain($domain) === null) {
+            $this->lastError = self::PREVIEW_DOMAIN_ERROR;
+
+            return false;
+        }
+
+        return $this->destroyTarget($project, $profile, $this->managedProjectName($project, $profile));
+    }
+
+    private function destroyTarget(object $project, object $profile, string $projectName, bool $removeDeclaredDatabases = false): bool
+    {
         $this->lastError = '';
         $errors = $this->validateConnectionConfig();
         if ($errors !== []) {
@@ -358,7 +370,6 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             return false;
         }
 
-        $projectName = $this->managedProjectName($project, $profile);
         $serviceName = $this->serviceName();
         $managedPrefix = $this->managedPrefix();
 
@@ -372,7 +383,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             $client = $this->getClient();
             $inventory = $client->listProjectsAndServices();
             if (! $this->projectExists($inventory, $projectName)) {
-                if ($this->projectExists($inventory, $this->legacyManagedProjectName($project, $profile))) {
+                if ($this->hasLegacyTarget($inventory, $project, $profile)) {
                     throw new \RuntimeException('Refusing to destroy a legacy EasyPanel project without unambiguous project/profile scope. Review and migrate it explicitly.');
                 }
                 return true;
@@ -399,7 +410,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
 
             $this->destroyWorkers($client, $project, $projectName);
             $this->destroyCron($client, $project, $projectName);
-            $this->destroyDatabases($client, $project, $projectName);
+            $this->reconcileDatabases($client, $project, $projectName, removeDeclared: $removeDeclaredDatabases);
             $client->destroyAppService($projectName, $serviceName);
 
             $remaining = $client->listProjectsAndServices();
@@ -433,29 +444,39 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
     /** @return array<int, array{site_id: int, domain: string}> */
     public function listSites(object $project, object $profile): array
     {
-        $projectName = $this->managedProjectName($project, $profile);
+        if ($this->profileName($profile) !== 'preview') {
+            return [];
+        }
+
+        $client = $this->getClient();
         $serviceName = $this->serviceName();
-        $inventory = $this->getClient()->listProjectsAndServices();
-        $service = $this->findService($inventory, $projectName, $serviceName);
-        if ($service === null || ($service['type'] ?? null) !== 'app') {
-            return [];
-        }
-
-        $inspected = $this->getClient()->inspectAppService($projectName, $serviceName);
-        $env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
-        if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
-            || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
-            return [];
-        }
-
-        $siteId = $this->previewSiteId($projectName, $serviceName);
-        $this->previewSiteTargets[$siteId] = ['project' => $projectName, 'service' => $serviceName];
-        $domains = $this->getClient()->listDomains($projectName, $serviceName);
+        $prefix = $this->legacyManagedProjectName($project, $profile).'-';
         $sites = [];
-        foreach ($domains as $domain) {
-            $host = $domain['host'] ?? ($domain['domain'] ?? null);
-            if (is_string($host) && $host !== '') {
-                $sites[] = ['site_id' => $siteId, 'domain' => $host];
+        foreach ($client->listProjectsAndServices()['services'] as $service) {
+            $projectName = $service['projectName'] ?? null;
+            if (! is_string($projectName) || ! str_starts_with($projectName, $prefix)
+                || ($service['name'] ?? null) !== $serviceName || ($service['type'] ?? null) !== 'app') {
+                continue;
+            }
+
+            $inspected = $client->inspectAppService($projectName, $serviceName);
+            $env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
+            if (! $this->hasEnvironmentLine($env, self::MANAGED_MARKER)
+                || ! $this->hasEnvironmentLine($env, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
+                continue;
+            }
+
+            $domains = $client->listDomains($projectName, $serviceName);
+            $hosts = array_unique(array_map(
+                fn (array $binding): ?string => $this->normalizeDomain($binding['host'] ?? $binding['domain'] ?? null),
+                $domains,
+            ));
+            if (count($hosts) !== 1) {
+                continue;
+            }
+            $host = $hosts[0];
+            if ($host !== null && $projectName === $this->scopedProjectName($project, $profile, $host)) {
+                $sites[] = ['site_id' => $this->previewSiteId($projectName, $serviceName), 'domain' => $host];
             }
         }
 
@@ -464,15 +485,17 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
 
     public function deleteSiteWithDatabases(object $project, object $profile, int $siteId): bool
     {
-        $projectName = $this->managedProjectName($project, $profile);
-        $expectedId = $this->previewSiteId($projectName, $this->serviceName());
-        if ($siteId !== $expectedId) {
-            $this->lastError = 'Refusing to destroy an EasyPanel preview target with an invalid site ID.';
+        $matches = array_values(array_filter(
+            $this->listSites($project, $profile),
+            static fn (array $site): bool => $site['site_id'] === $siteId,
+        ));
+        if (count($matches) !== 1) {
+            $this->lastError = 'Refusing to destroy an EasyPanel preview target without a unique owned site ID.';
 
             return false;
         }
 
-        return $this->destroy($project, $profile);
+        return $this->destroyTarget($project, $profile, $this->scopedProjectName($project, $profile, $matches[0]['domain']), removeDeclaredDatabases: true);
     }
 
     public function getLastError(): string
@@ -783,12 +806,6 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         $this->destroyOwnedCronService($client, $projectName, $service);
     }
 
-    private function destroyDatabases(EasyPanelClient $client, object $project, string $projectName): void
-    {
-        $inventory = $client->listProjectsAndServices();
-        $this->reconcileDatabases($client, $project, $projectName, $inventory);
-    }
-
     /** @param array{projects: array<int, array<string, mixed>>, services: array<int, array<string, mixed>>} $inventory @param array<string, bool> $desired */
     private function reconcileWorkers(EasyPanelClient $client, array $inventory, string $projectName, array $desired): void
     {
@@ -821,12 +838,12 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         $this->assertServiceAbsent($client, $projectName, 'scheduler');
     }
 
-    /** @param array{projects: array<int, array<string, mixed>>, services: array<int, array<string, mixed>>} $inventory */
-    private function reconcileDatabases(EasyPanelClient $client, object $project, string $projectName, ?array $inventory = null): void
+    /** @param array{projects: array<int, array<string, mixed>>, services: array<int, array<string, mixed>>}|null $inventory */
+    private function reconcileDatabases(EasyPanelClient $client, object $project, string $projectName, ?array $inventory = null, bool $removeDeclared = false): void
     {
         $inventory ??= $client->listProjectsAndServices();
         $desired = [];
-        if ($this->sectionDeclared($project, 'databases', 'databases') && method_exists($project, 'databases')) {
+        if (! $removeDeclared && $this->sectionDeclared($project, 'databases', 'databases') && method_exists($project, 'databases')) {
             foreach ($project->databases() as $database) {
                 if (method_exists($database, 'name')) {
                     $desired[$this->databaseServiceName($database->name())] = true;
@@ -998,6 +1015,11 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
     /** @return array<int, string> */
     public function logs(object $project, object $profile, int $lines = 100): array
     {
+        if ($this->profileName($profile) === 'preview'
+            && $this->normalizeDomain($this->profileValue($profile, 'domain')) === null) {
+            throw new \RuntimeException(self::PREVIEW_DOMAIN_ERROR);
+        }
+
         $records = $this->getClient()->queryServiceLogs(
             $this->managedProjectName($project, $profile),
             $this->serviceName(),
@@ -1021,6 +1043,11 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
     /** @return array<string, mixed> */
     public function status(object $project, object $profile): array
     {
+        if ($this->profileName($profile) === 'preview'
+            && $this->normalizeDomain($this->profileValue($profile, 'domain')) === null) {
+            throw new \RuntimeException(self::PREVIEW_DOMAIN_ERROR);
+        }
+
         $projectName = $this->managedProjectName($project, $profile);
         $serviceName = $this->serviceName();
         $service = $this->findService(
@@ -1385,9 +1412,30 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
 
     private function managedProjectName(object $project, object $profile): string
     {
-        $scope = json_encode([$this->projectName($project), $this->profileName($profile)], JSON_THROW_ON_ERROR);
+        $domain = $this->profileName($profile) === 'preview'
+            ? $this->normalizeDomain($this->profileValue($profile, 'domain'))
+            : null;
+
+        return $this->scopedProjectName($project, $profile, $domain);
+    }
+
+    private function scopedProjectName(object $project, object $profile, ?string $domain): string
+    {
+        $identity = [$this->projectName($project), $this->profileName($profile)];
+        if ($domain !== null) {
+            $identity[] = $domain;
+        }
+        $scope = json_encode($identity, JSON_THROW_ON_ERROR);
 
         return $this->legacyManagedProjectName($project, $profile).'-'.substr(hash('sha256', $scope), 0, 20);
+    }
+
+    /** @param array{projects: array<int, array<string, mixed>>, services: array<int, array<string, mixed>>} $inventory */
+    private function hasLegacyTarget(array $inventory, object $project, object $profile): bool
+    {
+        return $this->projectExists($inventory, $this->legacyManagedProjectName($project, $profile))
+            || ($this->profileName($profile) === 'preview'
+                && $this->projectExists($inventory, $this->scopedProjectName($project, $profile, null)));
     }
 
     private function legacyManagedProjectName(object $project, object $profile): string
@@ -1407,7 +1455,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
 
     private function previewSiteId(string $projectName, string $serviceName): int
     {
-        $id = (int) sprintf('%u', crc32($projectName."\0".$serviceName));
+        $id = (int) hexdec(substr(hash('sha256', $projectName."\0".$serviceName), 0, PHP_INT_SIZE === 8 ? 15 : 7));
 
         return $id > 0 ? $id : 1;
     }

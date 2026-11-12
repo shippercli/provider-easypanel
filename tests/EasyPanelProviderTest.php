@@ -37,41 +37,91 @@ final class EasyPanelProviderTest extends TestCase
 
     public function test_orphan_cleanup_lists_only_owned_preview_service_domains(): void
     {
-        $calls = [];
+        $prefix = 'shippercli-demo-provider-preview-';
+        $first = $prefix.substr(hash('sha256', '["provider","preview","pr-1.example.com"]'), 0, 20);
+        $second = $prefix.substr(hash('sha256', '["provider","preview","pr-2.example.com"]'), 0, 20);
+        $legacy = $prefix.'b7806089dcff5c6cd25c';
+        $bindings = [$first => 'pr-1.example.com', $second => 'pr-2.example.com', $legacy => 'pr-3.example.com'];
+        $destroyed = [];
+        $additionalHost = false;
+        $databases = [$first => true, $second => true];
         $client = new EasyPanelClient(
             'https://panel.example.com',
             'token',
-            transport: static function (string $procedure, array $input) use (&$calls): mixed {
-                $calls[] = [$procedure, $input];
+            transport: static function (string $procedure, array $input) use (&$bindings, &$destroyed, &$databases, &$additionalHost, $first): mixed {
+                $projectName = $input['projectName'] ?? '';
+                if ($procedure === 'services.postgres.destroyService') {
+                    $destroyed[] = $projectName.'/db-main';
+                    unset($databases[$projectName]);
+
+                    return [];
+                }
+                if ($procedure === 'services.app.destroyService') {
+                    $destroyed[] = $projectName;
+                    unset($bindings[$projectName]);
+
+                    return [];
+                }
 
                 return match ($procedure) {
                     'projects.listProjectsAndServices' => [
-                        'projects' => [['name' => 'shippercli-demo-provider-preview-b7806089dcff5c6cd25c']],
-                        'services' => [[
-                            'projectName' => 'shippercli-demo-provider-preview-b7806089dcff5c6cd25c',
-                            'name' => 'web',
-                            'type' => 'app',
-                        ]],
+                        'projects' => array_map(static fn (string $name): array => ['name' => $name], array_keys($bindings)),
+                        'services' => [
+                            ...array_map(static fn (string $name): array => [
+                                'projectName' => $name,
+                                'name' => 'web',
+                                'type' => 'app',
+                            ], array_keys($bindings)),
+                            ...array_map(static fn (string $name): array => [
+                                'projectName' => $name,
+                                'name' => 'db-main',
+                                'type' => 'postgres',
+                            ], array_keys($databases)),
+                        ],
                     ],
                     'services.app.inspectService' => [
-                        'env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-preview-b7806089dcff5c6cd25c",
+                        'env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=".$projectName,
                     ],
-                    'domains.listDomains' => [['host' => 'preview.example.com']],
+                    'services.postgres.inspectService' => [
+                        'env' => "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=".$projectName
+                            ."\nSHIPPERCLI_DATABASE_CREATED=".substr(hash('sha256', json_encode([$projectName, 'db-main'], JSON_THROW_ON_ERROR)), 0, 24),
+                    ],
+                    'domains.listDomains' => [
+                        ['host' => $bindings[$projectName]],
+                        ...($additionalHost && $projectName === $first ? [['host' => 'other.example.com']] : []),
+                    ],
                     default => [],
                 };
             },
         );
-        $provider = new EasyPanelProvider($this->config(), $client);
-
-        $sites = $provider->listSites($this->project(), new class {
+        $provider = new EasyPanelProvider($this->config() + ['destroy_project' => false], $client);
+        $profile = new class {
             public function name(): string { return 'preview'; }
-            public function get(string $key): mixed { return $key === 'domain' ? 'preview.example.com' : null; }
-        });
+            public function get(string $key): mixed { return $key === 'domain' ? 'pr-${GITHUB_PR_NUMBER}.example.com' : null; }
+        };
+        $project = new class {
+            public function name(): string { return 'provider'; }
+            public function databases(): array
+            {
+                return [new class {
+                    public function name(): string { return 'main'; }
+                }];
+            }
+        };
 
-        self::assertCount(1, $sites);
-        self::assertSame('preview.example.com', $sites[0]['domain']);
-        self::assertIsInt($sites[0]['site_id']);
-        self::assertSame('projects.listProjectsAndServices', $calls[0][0]);
+        $sites = $provider->listSites($project, $profile);
+
+        self::assertSame(['pr-1.example.com', 'pr-2.example.com'], array_column($sites, 'domain'));
+        self::assertNotSame($sites[0]['site_id'], $sites[1]['site_id']);
+        $additionalHost = true;
+        self::assertFalse($provider->deleteSiteWithDatabases($project, $profile, $sites[0]['site_id']));
+        self::assertSame([], $destroyed);
+        $additionalHost = false;
+        self::assertTrue($provider->deleteSiteWithDatabases($project, $profile, $sites[0]['site_id']), $provider->getLastError());
+        self::assertSame([$first.'/db-main', $first], $destroyed);
+        self::assertSame([$second => true], $databases);
+        self::assertSame([$sites[1]], $provider->listSites($project, $profile));
+        self::assertArrayHasKey($legacy, $bindings);
     }
 
     public function test_logs_query_uses_the_derived_managed_service(): void
