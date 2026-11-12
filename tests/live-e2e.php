@@ -18,8 +18,8 @@ $disposable = $argv === [$argv[0], '--disposable'];
 if (! $disposable && count($argv) !== 1) {
     throw new InvalidArgumentException('Unknown live test arguments.');
 }
-$name = $disposable ? 'e'.bin2hex(random_bytes(8)) : 'provider';
-$prefix = $disposable ? 'shippercli-e2e-' : 'shippercli-demo-';
+$name = $disposable ? 'e'.bin2hex(random_bytes(6)) : 'provider';
+$prefix = $disposable ? 's-' : 'shippercli-demo-';
 $expectedProject = $prefix.$name.'-v1-'.substr(hash('sha256', json_encode([$name, 'v1'], JSON_THROW_ON_ERROR)), 0, 20);
 $expectedService = 'web';
 $client = new EasyPanelClient($url, $token, timeout: 45);
