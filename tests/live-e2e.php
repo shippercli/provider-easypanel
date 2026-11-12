@@ -37,6 +37,10 @@ if ($disposable) {
     }
     $expectedDomain = $expectedService.'-'.$expectedProject.'.'.$baseDomain;
 }
+$mysqlDockerfile = $withDatabase ? file_get_contents(__DIR__.'/mysql-probe.Dockerfile') : null;
+if ($withDatabase && $mysqlDockerfile === false) {
+    throw new RuntimeException('The disposable MySQL Dockerfile could not be read.');
+}
 $provider = new EasyPanelProvider([
     'url' => $url,
     'auth_token' => $token,
@@ -44,7 +48,7 @@ $provider = new EasyPanelProvider([
     'service_name' => $expectedService,
     'source' => $withDatabase ? [
         'type' => 'dockerfile',
-        'dockerfile' => file_get_contents(__DIR__.'/mysql-probe.Dockerfile'),
+        'dockerfile' => $mysqlDockerfile,
     ] : [
         'type' => 'image',
         'image' => 'nginx:alpine',
@@ -76,6 +80,8 @@ $project = new class($name, $withDatabase) {
 };
 
 $profile = new class {
+    public ?array $source = null;
+
     public function name(): string
     {
         return 'v1';
@@ -88,7 +94,7 @@ $profile = new class {
 
     public function get(string $key): mixed
     {
-        return null;
+        return $key === 'source' ? $this->source : null;
     }
 };
 
@@ -191,7 +197,7 @@ try {
         throw new RuntimeException('The Shipper test service has no matching HTTPS binding.');
     }
 
-    $waitForApp = static function () use ($domainHost, $withDatabase): void {
+    $waitForApp = static function (string $sqlMarker) use ($domainHost, $withDatabase): void {
         $ready = false;
         $deadline = hrtime(true) + ($withDatabase ? 150 : 90) * 1_000_000_000;
         while (($remainingMs = intdiv($deadline - hrtime(true), 1_000_000)) > 0) {
@@ -210,7 +216,7 @@ try {
             unset($handle);
 
             if ($status === 200 && is_string($body) && ($withDatabase
-                ? $body === 'shippercli-mysql-query-ok'
+                ? $body === $sqlMarker
                 : str_contains($body, '<title>Welcome to nginx!</title>'))) {
                 $ready = true;
                 break;
@@ -228,7 +234,8 @@ try {
                 : 'The Shipper demo service did not become ready.');
         }
     };
-    $waitForApp();
+    $initialSqlMarker = 'shippercli-mysql-query-ok';
+    $waitForApp($initialSqlMarker);
 
     echo "EasyPanel demo deployment is ready.\n";
     if ($withDatabase) {
@@ -261,10 +268,19 @@ try {
         };
         $originalConnection = $withDatabase ? $connection() : [];
 
+        $redeploySqlMarker = $initialSqlMarker;
+        if ($withDatabase) {
+            $redeploySqlMarker .= '-'.bin2hex(random_bytes(8));
+            $redeployDockerfile = str_replace($initialSqlMarker, $redeploySqlMarker, $mysqlDockerfile, $replacements);
+            if ($replacements !== 1) {
+                throw new RuntimeException('Expected exactly one SQL readiness marker in the Dockerfile.');
+            }
+            $profile->source = ['type' => 'dockerfile', 'dockerfile' => $redeployDockerfile];
+        }
         if (! $provider->apply($project, $profile)) {
             throw new RuntimeException('Redeploy failed: '.$provider->getLastError());
         }
-        $waitForApp();
+        $waitForApp($redeploySqlMarker);
         $matchingDomains = array_filter(
             $client->listDomains($expectedProject, $expectedService),
             static fn (array $binding): bool => strcasecmp($binding['host'], $domainHost) === 0,
@@ -272,7 +288,9 @@ try {
         if (count($matchingDomains) !== 1) {
             throw new RuntimeException('Redeploy did not preserve exactly one automatic HTTPS binding.');
         }
-        echo "Redeploy accepted and the HTTPS endpoint remains ready.\n";
+        echo $withDatabase
+            ? "The new deployment generation served its SQL query marker over HTTPS.\n"
+            : "Redeploy accepted and the HTTPS endpoint remains ready.\n";
         if ($withDatabase) {
             if ($originalConnection !== $connection() || ! $client->hasRunningAppContainer($expectedProject, 'db-fixture')) {
                 throw new RuntimeException('The database runtime or retained application credentials could not be verified.');
