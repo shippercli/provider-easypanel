@@ -23,6 +23,20 @@ class ResponsesTest(unittest.TestCase):
                 procedure = self.path.rsplit('/', 1)[-1]
                 if self.path.startswith('/status-safety/'):
                     case, project = self.path.split('/')[2:4]
+                    if procedure.startswith('getDockerContainers'):
+                        if self.command != 'GET' or procedure != f'getDockerContainers?service={project}_app' or body:
+                            raise AssertionError('Runtime request used the wrong service, method or payload')
+                        label = f'{project}_app' if case in ['container', 'stopped'] else 'another_app'
+                        containers = [{'State': 'exited' if case == 'stopped' else 'running',
+                                       'Labels': {'com.docker.swarm.service.name': label}}]
+                        data = containers if case in ['container', 'stopped', 'other'] else []
+                        status = 404 if case == 'unavailable' else 200
+                        payload = json.dumps(data).encode()
+                        self.send_response(status)
+                        self.send_header('Content-Length', str(len(payload)))
+                        self.end_headers()
+                        self.wfile.write(payload)
+                        return
                     if procedure == 'projects.listProjectsAndServices':
                         data = {'projects': [{'name': project}], 'services': [{'projectName': project, 'name': 'app', 'type': 'app'}]}
                     else:
@@ -199,8 +213,12 @@ class ResponsesTest(unittest.TestCase):
                     self.assertTrue(path.endswith('/api/createAppService'))
                     self.assertEqual(auth, 'Bearer synthetic-authorization-secret')
                     self.assertEqual(json.loads(body), {'projectName': 'fixture', 'serviceName': 'web', 'env': 'SHIPPERCLI_MANAGED=1'})
-                self.assertEqual(len(received), 268)
-                self.assertTrue(all(auth == 'synthetic-authorization-secret' for path, auth, _ in received if not path.startswith('/owned-app/')))
+                self.assertEqual(len(received), 283)
+                runtime_requests = [(path, auth) for path, auth, _ in received if '/getDockerContainers?' in path]
+                self.assertEqual(len(runtime_requests), 7)
+                self.assertTrue(all(auth == 'Bearer synthetic-authorization-secret' for _, auth in runtime_requests))
+                self.assertTrue(all(auth == 'synthetic-authorization-secret' for path, auth, _ in received
+                                    if not path.startswith('/owned-app/') and '/getDockerContainers?' not in path))
                 self.assertEqual(sum(b'synthetic-body-secret' in body for _, _, body in received), 26)
                 for case in ['absent', 'retain-project', 'other-service', 'pending-app', 'pending-project', 'unreadable']:
                     procedures = [path.rsplit('/', 1)[-1] for path, _, _ in received if path.startswith('/cleanup/' + case + '/')]
