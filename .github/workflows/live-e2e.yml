@@ -103,6 +103,11 @@ jobs:
       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/easypanel-redis-release')
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    env:
+      SHIPPER_E2E_CLI_VERSION: '1.0.6'
+      SHIPPER_E2E_CLI_SHA: ba986fc715148ab77873de9ff74a6ab4c819bae2
+      SHIPPER_E2E_PROVIDER_VERSION: '2.1.0'
+      SHIPPER_E2E_PROVIDER_SHA: 5157b29d44abc6492ee61b048a830fa3c38dc3fd
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -209,7 +214,7 @@ jobs:
         env:
           COMPOSER_HOME: ${{ runner.temp }}/shipper-composer
         run: |
-          composer global require --no-interaction --prefer-dist shippercli/cli:1.0.6 shippercli/provider-easypanel:2.1.0
+          composer global require --no-interaction --prefer-dist "shippercli/cli:$SHIPPER_E2E_CLI_VERSION" "shippercli/provider-easypanel:$SHIPPER_E2E_PROVIDER_VERSION"
           echo "$COMPOSER_HOME/vendor/bin" >> "$GITHUB_PATH"
       - name: Install and validate through the published Shipper Action
         if: matrix.installation == 'action'
@@ -219,8 +224,8 @@ jobs:
           EASYPANEL_AUTH_TOKEN: ${{ secrets.EASYPANEL_AUTH_TOKEN }}
         with:
           command: validate
-          cli-version: '1.0.6'
-          providers: shippercli/provider-easypanel:2.1.0
+          cli-version: ${{ env.SHIPPER_E2E_CLI_VERSION }}
+          providers: shippercli/provider-easypanel:${{ env.SHIPPER_E2E_PROVIDER_VERSION }}
           working-directory: published-fixture
       - name: Verify published deployment, HTTPS, and cleanup
         working-directory: published-fixture
