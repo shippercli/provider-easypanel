@@ -45,6 +45,22 @@ foreach (['matching', 'different', 'unrelated'] as $case) {
     }
 }
 
+foreach (['matching', 'missing', 'wrong-port', 'wrong-protocol'] as $case) {
+    $api = new EasyPanelClient($argv[1].'/domain-ack/'.$case, 'synthetic-authorization-secret');
+    $failed = false;
+    try {
+        $api->createDomain('fixture', 'web', 'fixture.test');
+    } catch (RuntimeException $exception) {
+        if ($exception->getMessage() !== 'EasyPanel did not persist the requested HTTPS binding.') {
+            throw $exception;
+        }
+        $failed = true;
+    }
+    if ($failed !== ($case !== 'matching')) {
+        throw new RuntimeException('Unexpected HTTPS binding verification result: '.$case);
+    }
+}
+
 foreach (['direct', 'nested'] as $format) {
     if ($client->call('success-'.$format) !== ['accepted' => true]) {
         throw new RuntimeException('Successful response decoding changed');
