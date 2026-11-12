@@ -220,6 +220,59 @@ final class EasyPanelProviderTest extends TestCase
         }
     }
 
+    #[\PHPUnit\Framework\Attributes\TestWith(['demo.shippercli.com'])]
+    #[\PHPUnit\Framework\Attributes\TestWith([null])]
+    public function test_apply_retry_rejects_a_saved_domain_with_the_wrong_destination(?string $domain): void
+    {
+        $projectName = 'shippercli-demo-provider-v1-811454f76c57a1580028';
+        $environment = "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=".$projectName;
+        $binding = null;
+        $calls = [];
+        $client = new EasyPanelClient('https://panel.example.com', 'token',
+            transport: static function (string $procedure, array $input) use ($projectName, &$environment, &$binding, &$calls): mixed {
+                $calls[] = $procedure;
+                if ($procedure === 'services.app.updateEnv') {
+                    $environment = $input['env'];
+                }
+                if ($procedure === 'domains.createDomain') {
+                    $binding = $input;
+                    $binding['serviceDestination']['port'] = 8080;
+
+                    return new \stdClass();
+                }
+
+                return match ($procedure) {
+                    'projects.listProjectsAndServices' => [
+                        'projects' => [['name' => $projectName]],
+                        'services' => [['projectName' => $projectName, 'name' => 'web', 'type' => 'app']],
+                    ],
+                    'services.app.inspectService' => ['env' => $environment],
+                    'getServiceDomain' => ['defaultServiceDomain' => 'services.example.com'],
+                    'domains.listDomains' => $binding === null ? [] : [
+                        $binding,
+                        ['host' => 'web-'.$projectName.'.unrelated.example.com', 'path' => '/', 'https' => false],
+                    ],
+                    default => null,
+                };
+            },
+        );
+        $provider = new EasyPanelProvider($this->config(), $client);
+        $project = $this->project();
+        $profile = $this->profile($domain);
+
+        self::assertFalse($provider->apply($project, $profile));
+        self::assertStringContainsString('did not persist the requested HTTPS binding', $provider->getLastError());
+        self::assertFalse($provider->apply($project, $profile));
+        self::assertStringContainsString('does not match the requested HTTPS binding', $provider->getLastError());
+        self::assertNotContains('services.app.deployService', $calls);
+        self::assertSame(1, count(array_keys($calls, 'domains.createDomain', true)));
+
+        $binding['serviceDestination']['port'] = 80;
+        self::assertTrue($provider->apply($project, $profile), $provider->getLastError());
+        self::assertContains('services.app.deployService', $calls);
+        self::assertSame(1, count(array_keys($calls, 'domains.createDomain', true)));
+    }
+
     public function test_apply_removes_an_owned_worker_removed_from_configuration(): void
     {
         $calls = [];

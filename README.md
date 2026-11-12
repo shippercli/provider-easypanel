@@ -261,6 +261,10 @@ normalization. These are shape checks: ownership markers, expected identities,
 requested configuration, runtime state and live compatibility require separate
 verification.
 
+Before reusing a requested HTTPS root binding, Shipper verifies the destination,
+backend path, port and protocol. A conflicting binding stops deployment with a
+diagnostic so the operator can review the existing route in EasyPanel.
+
 Inspection responses also reject contradictory optional `projectName`,
 `serviceName`, `name` or `type` fields. When present, each must exactly match the
 requested project, service and canonical service type. Diagnostics do not echo
@@ -281,7 +285,9 @@ flow. If project cleanup is enabled and no services remain, a second fresh read
 must show the project absent after its deletion request. Other services are
 preserved and prevent project deletion. Each verification makes one observation
 and sends no repeated delete; asynchronous work may return an unconfirmed result
-requiring a status check before retry. This proves observed API inventory
+requiring a status check before retry. If a retry finds an empty project and no
+app ownership markers, Shipper reports incomplete cleanup. Verify ownership in
+EasyPanel before removing the empty project there. This proves observed API inventory
 absence, not physical erasure, worker/database completion, or transactional
 cleanup. Live account verification remains required.
 

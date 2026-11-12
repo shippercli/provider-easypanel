@@ -52,5 +52,11 @@ final class CleanupVerificationTest extends TestCase
         if (in_array($case, ['pending-app', 'unreadable', 'other-service', 'retain-project'], true)) {
             self::assertNotContains('projects.destroyProject', $calls);
         }
+        if (in_array($case, ['pending-project', 'invalid-response-present'], true)) {
+            $calls = [];
+            self::assertFalse($provider->destroy($project, $profile));
+            self::assertStringContainsString('no app ownership markers', $provider->getLastError());
+            self::assertSame(['projects.listProjectsAndServices'], $calls);
+        }
     }
 }
