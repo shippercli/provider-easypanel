@@ -12,7 +12,7 @@ on:
         type: boolean
         default: false
       recover-failed-probe:
-        description: Recover the disposable project from run 43218154916
+        description: Recover the disposable project from run 43218511043
         type: boolean
         default: false
       check-public-api:

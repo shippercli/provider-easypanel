@@ -39,8 +39,8 @@ $request = static function (string $route, ?array $payload = null) use ($url, $t
 };
 
 if ($recover) {
-    // Exact disposable project logged by run 43218154916.
-    $project = 's-ebe13de211a69-v1-46606c607e4e596056ee';
+    // Exact disposable project logged by run 43218511043.
+    $project = 's-ec68be70d5292-v1-b6442ef7990e44f816e0';
     $inventory = $client->listProjectsAndServices();
     if (! in_array($project, array_column($inventory['projects'], 'name'), true)) {
         echo "Disposable project is already absent.\n";
