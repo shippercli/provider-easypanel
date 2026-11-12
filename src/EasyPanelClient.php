@@ -215,11 +215,18 @@ final class EasyPanelClient
 
     public function updateImageSource(string $projectName, string $serviceName, string $image): void
     {
-        $this->call('services.app.updateSourceImage', [
+        $result = $this->call('services.app.updateSourceImage', [
             'projectName' => $projectName,
             'serviceName' => $serviceName,
             'image' => $image,
         ]);
+        if ($result instanceof \stdClass && (array) $result === []) {
+            $inspection = $this->inspectAppService($projectName, $serviceName);
+            $savedImage = $inspection['source']['image'] ?? $inspection['image'] ?? null;
+            if ($savedImage !== $image) {
+                throw new \RuntimeException('EasyPanel image source update could not be verified.');
+            }
+        }
     }
 
     public function updateGitSource(string $projectName, string $serviceName, string $repo, string $ref, string $path): void
@@ -464,6 +471,10 @@ final class EasyPanelClient
         }
         if (! $shape instanceof \stdClass) {
             throw new \RuntimeException('EasyPanel API returned an invalid response.');
+        }
+        // These void mutations can return an empty object on the legacy API.
+        if ((array) $shape === [] && in_array($procedure, ['services.app.updateSourceImage', 'services.app.destroyService'], true)) {
+            return $shape;
         }
         $result = $shape->result ?? null;
         foreach ([$shape, $result] as $envelope) {
