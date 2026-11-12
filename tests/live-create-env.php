@@ -30,7 +30,7 @@ if ($recover) {
         }
     }
 
-    $client->destroyProject($project);
+    $client->call('projects.destroyProject', ['name' => $project]);
     if (in_array($project, array_column($client->listProjectsAndServices()['projects'], 'name'), true)) {
         throw new RuntimeException('Disposable project still exists after recovery.');
     }
