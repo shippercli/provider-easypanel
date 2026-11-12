@@ -22,36 +22,15 @@ $name = $disposable ? 'e'.bin2hex(random_bytes(6)) : 'provider';
 $prefix = $disposable ? 's-' : 'shippercli-demo-';
 $expectedProject = $prefix.$name.'-v1-'.substr(hash('sha256', json_encode([$name, 'v1'], JSON_THROW_ON_ERROR)), 0, 20);
 $expectedService = 'web';
-$requestedDomain = null;
-if ($disposable) {
-    $handle = curl_init(rtrim($url, '/').'/api/getServiceDomain');
-    if ($handle === false) {
-        throw new RuntimeException('Unable to initialize the service domain settings request.');
-    }
-    curl_setopt_array($handle, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 20,
-        CURLOPT_PROTOCOLS_STR => 'HTTPS',
-        CURLOPT_HTTPHEADER => ['Authorization: Bearer '.$token],
-    ]);
-    $response = curl_exec($handle);
-    $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
-    unset($handle);
-    if ($status !== 200 || ! is_string($response)) {
-        throw new RuntimeException('Unable to read the EasyPanel service domain settings.');
-    }
-
-    $settings = json_decode($response, true);
-    $baseDomain = $settings['defaultServiceDomain'] ?? null;
-    if (! is_string($baseDomain) || ! str_contains($baseDomain, '.')) {
-        throw new RuntimeException('EasyPanel did not provide a default service base domain.');
-    }
-    $requestedDomain = $expectedService.'-'.$expectedProject.'.'.$baseDomain;
-    if (! filter_var($requestedDomain, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
-        throw new RuntimeException('The disposable HTTPS hostname is invalid.');
-    }
-}
 $client = new EasyPanelClient($url, $token, timeout: 45);
+$expectedDomain = null;
+if ($disposable) {
+    $baseDomain = $client->serviceBaseDomain();
+    if ($baseDomain === null) {
+        throw new RuntimeException('EasyPanel did not provide a service base domain.');
+    }
+    $expectedDomain = $expectedService.'-'.$expectedProject.'.'.$baseDomain;
+}
 $provider = new EasyPanelProvider([
     'url' => $url,
     'auth_token' => $token,
@@ -78,9 +57,7 @@ $project = new class($name) {
     }
 };
 
-$profile = new class($requestedDomain) {
-    public function __construct(private readonly ?string $domain) {}
-
+$profile = new class {
     public function name(): string
     {
         return 'v1';
@@ -93,7 +70,7 @@ $profile = new class($requestedDomain) {
 
     public function get(string $key): mixed
     {
-        return $key === 'domain' ? $this->domain : null;
+        return null;
     }
 };
 
@@ -107,82 +84,8 @@ if ($disposable) {
     echo "Disposable lifecycle project: {$expectedProject}\n";
 }
 
-$probeRuntimeInventory = static function (string $phase) use ($url, $token, $expectedProject, $expectedService): void {
-    $query = http_build_query(['service' => $expectedProject.'_'.$expectedService]);
-    $handle = curl_init(rtrim($url, '/').'/api/getDockerContainers?'.$query);
-    if ($handle === false) {
-        throw new RuntimeException('Unable to initialize the runtime inventory request.');
-    }
-    curl_setopt_array($handle, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 20,
-        CURLOPT_PROTOCOLS_STR => 'HTTPS',
-        CURLOPT_HTTPHEADER => ['Authorization: Bearer '.$token],
-    ]);
-    $response = curl_exec($handle);
-    $httpStatus = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
-    unset($handle);
-    $containers = $httpStatus === 200 && is_string($response) ? json_decode($response) : null;
-    $identity = $expectedProject.'_'.$expectedService;
-    $serviceLabels = 0;
-    $matchingLabels = 0;
-    $matchingNames = 0;
-    $runningStates = 0;
-    foreach (is_array($containers) ? $containers : [] as $container) {
-        $serviceLabel = $container->Labels->{'com.docker.swarm.service.name'} ?? null;
-        $serviceLabels += is_string($serviceLabel) ? 1 : 0;
-        $matchingLabels += $serviceLabel === $identity ? 1 : 0;
-        $runningStates += ($container->State ?? null) === 'running' ? 1 : 0;
-        $names = $container->Names ?? [];
-        foreach (is_array($names) ? $names : [] as $name) {
-            if (is_string($name) && str_starts_with(ltrim($name, '/'), $identity.'.')) {
-                $matchingNames++;
-                break;
-            }
-        }
-    }
-    printf(
-        "Disposable runtime inventory %s: HTTP %d, shape=%s, list_count=%d, service_labels=%d, matching_labels=%d, matching_names=%d, running_states=%d\n",
-        $phase,
-        $httpStatus,
-        gettype($containers),
-        is_array($containers) ? count($containers) : 0,
-        $serviceLabels,
-        $matchingLabels,
-        $matchingNames,
-        $runningStates,
-    );
-};
-
 try {
-    if ($disposable) {
-        $client->createProject($expectedProject);
-        $client->createAppService(
-            $expectedProject,
-            $expectedService,
-            "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT={$expectedProject}",
-        );
-        $probeRuntimeInventory('before deployment');
-    }
-
     if (! $provider->apply($project, $profile)) {
-        if ($disposable && $requestedDomain !== null) {
-            $bindingSaved = false;
-            foreach ($client->listDomains($expectedProject, $expectedService) as $domain) {
-                if (
-                    strcasecmp($domain['host'], $requestedDomain) === 0
-                    && ($domain['https'] ?? null) === true
-                    && ($domain['destinationType'] ?? null) === 'service'
-                    && ($domain['serviceDestination']['projectName'] ?? null) === $expectedProject
-                    && ($domain['serviceDestination']['serviceName'] ?? null) === $expectedService
-                    && ($domain['serviceDestination']['port'] ?? null) === 80
-                ) {
-                    $bindingSaved = true;
-                    break;
-                }
-            }
-            echo $bindingSaved ? "Exact HTTPS binding persisted.\n" : "Exact HTTPS binding absent.\n";
-        }
         throw new RuntimeException($provider->getLastError());
     }
 
@@ -237,7 +140,7 @@ try {
             && ($domain['serviceDestination']['projectName'] ?? null) === $expectedProject
             && ($domain['serviceDestination']['serviceName'] ?? null) === $expectedService
             && is_string($domain['host'] ?? null)
-            && ($requestedDomain === null || strcasecmp($domain['host'], $requestedDomain) === 0)
+            && ($expectedDomain === null || strcasecmp($domain['host'], $expectedDomain) === 0)
         ) {
             $domainHost = $domain['host'];
             break;
@@ -283,17 +186,22 @@ try {
 
     if ($disposable) {
         $status = $provider->status($project, $profile);
-        if ($status['project'] !== $expectedProject || $status['service'] !== $expectedService || $status['state'] === 'not_found') {
+        if ($status['project'] !== $expectedProject || $status['service'] !== $expectedService || $status['state'] !== 'running') {
             throw new RuntimeException('Provider status did not identify the deployed app.');
         }
         echo "Provider status: {$status['state']}\n";
-
-        $probeRuntimeInventory('after HTTPS readiness');
 
         if (! $provider->apply($project, $profile)) {
             throw new RuntimeException('Redeploy failed: '.$provider->getLastError());
         }
         $waitForNginx();
+        $matchingDomains = array_filter(
+            $client->listDomains($expectedProject, $expectedService),
+            static fn (array $binding): bool => strcasecmp($binding['host'], $domainHost) === 0,
+        );
+        if (count($matchingDomains) !== 1) {
+            throw new RuntimeException('Redeploy did not preserve exactly one automatic HTTPS binding.');
+        }
         echo "Redeploy accepted and endpoint still serves nginx.\n";
 
         $logs = $provider->logs($project, $profile, 20);

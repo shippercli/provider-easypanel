@@ -296,6 +296,42 @@ final class EasyPanelClient
         return $data;
     }
 
+    public function serviceBaseDomain(): ?string
+    {
+        try {
+            $settings = $this->transport !== null
+                ? ($this->transport)('getServiceDomain', [])
+                : \json_decode($this->request('/api/getServiceDomain', 'Bearer '.$this->authToken), true, flags: \JSON_THROW_ON_ERROR);
+        } catch (\RuntimeException $exception) {
+            if (\in_array($exception->getCode(), [403, 404], true)) {
+                return null;
+            }
+            throw $exception;
+        }
+
+        if ($settings === null) {
+            return null;
+        }
+        if (! \is_array($settings)) {
+            throw new \RuntimeException('EasyPanel returned invalid service domain settings.');
+        }
+
+        foreach (['customServiceDomain', 'defaultServiceDomain'] as $key) {
+            $domain = $settings[$key] ?? '';
+            if ($domain === '') {
+                continue;
+            }
+            if (! \is_string($domain) || ! \filter_var($domain, \FILTER_VALIDATE_DOMAIN, \FILTER_FLAG_HOSTNAME)
+                || ! \str_contains($domain, '.') || \str_ends_with($domain, '.') || \filter_var($domain, \FILTER_VALIDATE_IP)) {
+                throw new \RuntimeException('EasyPanel returned an invalid service base domain.');
+            }
+
+            return \strtolower($domain);
+        }
+
+        return null;
+    }
+
     public function createDomain(
         string $projectName,
         string $serviceName,
@@ -396,14 +432,7 @@ final class EasyPanelClient
 
         $response = $this->post('/api/trpc/'.$procedure, $this->authToken, ['json' => (object) $input]);
 
-        try {
-            return $this->decodeResponse($response, $procedure);
-        } catch (\RuntimeException $exception) {
-            if (\preg_match('~\A[a-zA-Z.]+\z~', $procedure) === 1) {
-                fwrite(STDERR, "EasyPanel operation returned an unreadable response: {$procedure}\n");
-            }
-            throw $exception;
-        }
+        return $this->decodeResponse($response, $procedure);
     }
 
     public function hasRunningAppContainer(string $projectName, string $serviceName): bool
@@ -471,10 +500,7 @@ final class EasyPanelClient
         }
 
         if ($status < 200 || $status >= 300) {
-            if (\preg_match('~\A/api/(?:trpc/)?[a-zA-Z.]+\z~', $path) === 1) {
-                fwrite(STDERR, "EasyPanel operation rejected: {$path}\n");
-            }
-            throw new \RuntimeException('EasyPanel API request failed (HTTP '.$status.').');
+            throw new \RuntimeException('EasyPanel API request failed (HTTP '.$status.').', $status);
         }
 
         return $response;
@@ -500,30 +526,6 @@ final class EasyPanelClient
             $shape = \json_decode($response, false, 512, JSON_THROW_ON_ERROR);
         } catch (\JsonException) {
             throw new \RuntimeException('EasyPanel API returned invalid JSON.');
-        }
-        if (in_array($procedure, [
-            'domains.createDomain',
-            'services.app.updateSourceImage',
-            'services.app.destroyService',
-            'services.app.updateEnv',
-            'services.app.deployService',
-            'projects.destroyProject',
-        ], true)) {
-            $result = $shape instanceof \stdClass ? ($shape->result ?? null) : null;
-            $data = $result instanceof \stdClass ? ($result->data ?? null) : null;
-            fwrite(STDERR, sprintf(
-                "EasyPanel probe %s: response=%s result=%s data=%s directJson=%d nestedJson=%d emptyData=%d emptyResult=%d emptyResponse=%d explicitSuccess=%d\n",
-                $procedure,
-                gettype($shape),
-                gettype($result),
-                gettype($data),
-                $shape instanceof \stdClass && property_exists($shape, 'json'),
-                $data instanceof \stdClass && property_exists($data, 'json'),
-                $data instanceof \stdClass && (array) $data === [],
-                $result instanceof \stdClass && (array) $result === [],
-                $shape instanceof \stdClass && (array) $shape === [],
-                $shape instanceof \stdClass && ($shape->success ?? null) === true,
-            ));
         }
         if (! $shape instanceof \stdClass) {
             throw new \RuntimeException('EasyPanel API returned an invalid response.');

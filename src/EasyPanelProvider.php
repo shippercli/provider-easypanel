@@ -137,8 +137,8 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
 
         if ($domain !== null) {
             $actions[] = 'Create or reuse HTTPS domain: '.$domain;
-        } else {
-            $actions[] = 'Use the EasyPanel-generated HTTPS domain';
+        } elseif ($this->booleanConfig('automatic_domain', true)) {
+            $actions[] = 'Create an HTTPS domain from EasyPanel settings if the app has no domain';
         }
 
         $actions[] = 'Deploy app service through the EasyPanel API';
@@ -336,7 +336,20 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             $this->applyCron($client, $project, $profile, $projectName, $source, $databaseEnvironment);
 
             $domain = $this->normalizeDomain($this->profileValue($profile, 'domain'));
-            if ($domain !== null && ! $this->domainExists($client->listDomains($projectName, $serviceName), $domain)) {
+            $domains = [];
+            if ($domain !== null || $this->booleanConfig('automatic_domain', true)) {
+                $domains = $client->listDomains($projectName, $serviceName);
+                if ($domain === null && $domains === []) {
+                    $base = $client->serviceBaseDomain();
+                    if ($base !== null) {
+                        $domain = $serviceName.'-'.$projectName.'.'.$base;
+                        if (! \filter_var($domain, \FILTER_VALIDATE_DOMAIN, \FILTER_FLAG_HOSTNAME)) {
+                            throw new \RuntimeException('The derived EasyPanel domain is invalid. Configure a profile domain.');
+                        }
+                    }
+                }
+            }
+            if ($domain !== null && ! $this->domainExists($domains, $domain)) {
                 $client->createDomain(
                     $projectName,
                     $serviceName,

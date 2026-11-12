@@ -7,6 +7,7 @@ use ShipperCli\ProviderEasyPanel\EasyPanelClient;
 use ShipperCli\ProviderEasyPanel\EasyPanelProvider;
 
 $config = ['url' => 'https://fixture.test', 'auth_token' => 'synthetic-authorization-secret',
+    'automatic_domain' => false,
     'source' => ['type' => 'git', 'repo' => 'https://github.com/example/app.git'],
     'env' => ['SECRET' => 'synthetic-$literal']];
 foreach (['worker', 'scheduler'] as $workload) {

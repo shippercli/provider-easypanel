@@ -9,6 +9,7 @@ use ShipperCli\ProviderEasyPanel\EasyPanelProvider;
 $project = new class { public function name(): string { return 'fixture'; } };
 $profile = new class { public function name(): string { return 'production'; } public function get(string $key): mixed { return null; } };
 $config = ['url' => 'https://fixture.test', 'auth_token' => 'synthetic-authorization-secret',
+    'automatic_domain' => false,
     'source' => ['type' => 'image', 'image' => 'nginx:alpine'],
     'env' => ['SECRET' => 'synthetic-$literal', 'EMPTY' => '', 'ZERO' => 0]];
 $name = (new ReflectionMethod(EasyPanelProvider::class, 'managedProjectName'))->invoke(new EasyPanelProvider($config), $project, $profile);

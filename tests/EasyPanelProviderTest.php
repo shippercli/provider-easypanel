@@ -151,16 +151,26 @@ final class EasyPanelProviderTest extends TestCase
         self::assertSame('services.app.inspectService', $calls[1][0]);
     }
 
-    #[\PHPUnit\Framework\Attributes\TestWith([true])]
-    #[\PHPUnit\Framework\Attributes\TestWith([false])]
-    public function test_apply_creates_and_deploys_only_the_derived_managed_resources(bool $persistsOwnership): void
+    #[\PHPUnit\Framework\Attributes\TestWith([true, 'demo.shippercli.com'])]
+    #[\PHPUnit\Framework\Attributes\TestWith([false, 'demo.shippercli.com'])]
+    #[\PHPUnit\Framework\Attributes\TestWith([true, null])]
+    #[\PHPUnit\Framework\Attributes\TestWith([true, null, false])]
+    #[\PHPUnit\Framework\Attributes\TestWith([true, null, true, true])]
+    #[\PHPUnit\Framework\Attributes\TestWith([true, null, true, false, false])]
+    public function test_apply_creates_and_deploys_only_the_derived_managed_resources(
+        bool $persistsOwnership,
+        ?string $domain,
+        bool $automaticDomain = true,
+        bool $existingDomain = false,
+        bool $settingsAvailable = true,
+    ): void
     {
         $calls = [];
         $savedEnvironments = [];
         $client = new EasyPanelClient(
             'https://panel.example.com',
             'token',
-            transport: static function (string $procedure, array $input) use (&$savedEnvironments, &$calls, $persistsOwnership): mixed {
+            transport: static function (string $procedure, array $input) use (&$savedEnvironments, &$calls, $persistsOwnership, $existingDomain, $settingsAvailable): mixed {
                 $calls[] = [$procedure, $input];
                 if ($procedure === 'createAppService') $savedEnvironments[$input['serviceName']] = $persistsOwnership ? $input['env'] : '';
                 if ($procedure === 'services.app.updateEnv') $savedEnvironments[$input['serviceName']] = $input['env'];
@@ -168,18 +178,22 @@ final class EasyPanelProviderTest extends TestCase
 
                 return match ($procedure) {
                     'projects.listProjectsAndServices' => ['projects' => [], 'services' => []],
-                    'domains.listDomains' => [],
+                    'domains.listDomains' => $existingDomain ? [['host' => 'existing.example.com']] : [],
+                    'getServiceDomain' => $settingsAvailable ? ['defaultServiceDomain' => 'services.example.com']
+                        : throw new \RuntimeException('Missing settings endpoint', 404),
                     default => null,
                 };
             },
         );
-        $provider = new EasyPanelProvider($this->config(), $client);
+        $provider = new EasyPanelProvider([...$this->config(), 'automatic_domain' => $automaticDomain], $client);
 
-        self::assertSame($persistsOwnership, $provider->apply($this->project(), $this->profile()));
+        self::assertSame($persistsOwnership, $provider->apply($this->project(), $this->profile($domain)));
         if (! $persistsOwnership) {
             self::assertSame(['projects.listProjectsAndServices', 'projects.createProject', 'createAppService', 'services.app.inspectService'], \array_column($calls, 0));
             return;
         }
+        $looksUpSettings = $domain === null && $automaticDomain && ! $existingDomain;
+        $createsDomain = $domain !== null || ($looksUpSettings && $settingsAvailable);
         self::assertSame([
             'projects.listProjectsAndServices',
             'projects.createProject',
@@ -190,8 +204,9 @@ final class EasyPanelProviderTest extends TestCase
             'services.app.inspectService',
             'projects.listProjectsAndServices',
             'projects.listProjectsAndServices',
-            'domains.listDomains',
-            'domains.createDomain',
+            ...($domain !== null || $automaticDomain ? ['domains.listDomains'] : []),
+            ...($looksUpSettings ? ['getServiceDomain'] : []),
+            ...($createsDomain ? ['domains.createDomain'] : []),
             'services.app.deployService',
         ], \array_column($calls, 0));
         self::assertSame('shippercli-demo-provider-v1-811454f76c57a1580028', $calls[1][1]['name']);
@@ -199,7 +214,10 @@ final class EasyPanelProviderTest extends TestCase
         self::assertSame("SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028", $calls[2][1]['env']);
         self::assertStringContainsString('SHIPPERCLI_MANAGED=1', $calls[5][1]['env']);
         self::assertStringContainsString('SHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028', $calls[5][1]['env']);
-        self::assertSame('demo.shippercli.com', $calls[10][1]['host']);
+        if ($createsDomain) {
+            $binding = $calls[$looksUpSettings ? 11 : 10][1];
+            self::assertSame($domain ?? 'web-shippercli-demo-provider-v1-811454f76c57a1580028.services.example.com', $binding['host']);
+        }
     }
 
     public function test_apply_removes_an_owned_worker_removed_from_configuration(): void
@@ -548,9 +566,11 @@ final class EasyPanelProviderTest extends TestCase
         };
     }
 
-    private function profile(): object
+    private function profile(?string $domain = 'demo.shippercli.com'): object
     {
-        return new class {
+        return new class($domain) {
+            public function __construct(private readonly ?string $domain) {}
+
             public function name(): string
             {
                 return 'v1';
@@ -564,7 +584,7 @@ final class EasyPanelProviderTest extends TestCase
             public function get(string $key): mixed
             {
                 return match ($key) {
-                    'domain' => 'demo.shippercli.com',
+                    'domain' => $this->domain,
                     'env' => ['APP_ENV' => 'production'],
                     default => null,
                 };
