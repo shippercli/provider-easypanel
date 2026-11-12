@@ -2,6 +2,11 @@ name: EasyPanel Live E2E
 
 on:
   workflow_dispatch:
+    inputs:
+      probe-create-env:
+        description: Check ownership marker persistence on a disposable app
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -18,7 +23,7 @@ concurrency:
 
 jobs:
   deploy-demo:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && !inputs.probe-create-env
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -33,3 +38,20 @@ jobs:
       - run: composer install --no-interaction --prefer-dist
       - name: Apply and verify dedicated demo
         run: php tests/live-e2e.php
+
+  probe-create-env:
+    if: github.event_name == 'workflow_dispatch' && inputs.probe-create-env
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      EASYPANEL_URL: ${{ secrets.EASYPANEL_URL }}
+      EASYPANEL_AUTH_TOKEN: ${{ secrets.EASYPANEL_AUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - run: composer install --no-interaction --prefer-dist
+      - name: Check environment persistence at app creation
+        run: php tests/live-create-env.php
