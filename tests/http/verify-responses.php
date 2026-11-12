@@ -28,6 +28,23 @@ foreach ([301, 302, 303, 307, 308, 400, 401, 403, 404, 422, 429, 500, 502] as $s
         }
     }
 }
+foreach (['matching', 'different', 'unrelated'] as $case) {
+    $api = new EasyPanelClient($argv[1].'/image-ack/'.$case, 'synthetic-authorization-secret');
+    $failed = false;
+    try {
+        if ($case === 'unrelated') {
+            $api->call('services.app.deployService');
+        } else {
+            $api->updateImageSource('fixture', 'web', 'nginx:alpine');
+        }
+    } catch (RuntimeException) {
+        $failed = true;
+    }
+    if ($failed !== ($case !== 'matching')) {
+        throw new RuntimeException('Unexpected empty mutation acknowledgement result: '.$case);
+    }
+}
+
 foreach (['direct', 'nested'] as $format) {
     if ($client->call('success-'.$format) !== ['accepted' => true]) {
         throw new RuntimeException('Successful response decoding changed');
