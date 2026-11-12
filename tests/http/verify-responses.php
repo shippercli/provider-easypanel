@@ -33,7 +33,7 @@ foreach (['matching', 'different', 'unrelated'] as $case) {
     $failed = false;
     try {
         if ($case === 'unrelated') {
-            $api->call('services.app.updateSourceGithub');
+            $api->call('projects.listProjectsAndServices');
         } else {
             $api->updateImageSource('fixture', 'web', 'nginx:alpine');
         }
@@ -58,6 +58,22 @@ foreach (['matching', 'type', 'repo', 'ref', 'path'] as $case) {
     }
     if ($failed !== ($case !== 'matching')) {
         throw new RuntimeException('Unexpected Git source acknowledgement result: '.$case);
+    }
+}
+
+foreach (['matching', 'type', 'owner', 'repo', 'ref', 'path'] as $case) {
+    $api = new EasyPanelClient($argv[1].'/github-ack/'.$case, 'synthetic-authorization-secret');
+    $failed = false;
+    try {
+        $api->updateGithubSource('fixture', 'web', 'example', 'app', 'main', '/app');
+    } catch (RuntimeException $exception) {
+        if ($exception->getMessage() !== 'EasyPanel GitHub source update could not be verified.') {
+            throw $exception;
+        }
+        $failed = true;
+    }
+    if ($failed !== ($case !== 'matching')) {
+        throw new RuntimeException('Unexpected GitHub source acknowledgement result: '.$case);
     }
 }
 

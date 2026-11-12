@@ -89,13 +89,19 @@ class ResponsesTest(unittest.TestCase):
                         if case == 'different':
                             data['image'] = 'nginx:alpine'
                         payload = json.dumps({'json': data}).encode()
-                elif self.path.startswith('/git-ack/'):
+                elif self.path.startswith(('/git-ack/', '/github-ack/')):
                     case = self.path.split('/')[2]
-                    source = {'type': 'git', 'repo': 'https://example.test/app.git', 'ref': 'main', 'path': '/app'}
+                    github = self.path.startswith('/github-ack/')
+                    source = {'type': 'github' if github else 'git',
+                              'repo': 'app' if github else 'https://example.test/app.git', 'ref': 'main', 'path': '/app'}
+                    if github:
+                        source['owner'] = 'example'
                     status, payload = 200, b'{}'
-                    if procedure == 'services.app.updateSourceGit':
+                    if procedure == ('services.app.updateSourceGithub' if github else 'services.app.updateSourceGit'):
                         expected = {'projectName': 'fixture', 'serviceName': 'web',
                                     'repo': source['repo'], 'ref': source['ref'], 'path': source['path']}
+                        if github:
+                            expected['owner'] = source['owner']
                         if json.loads(body)['json'] != expected:
                             raise AssertionError('Git mutation target or source fields changed')
                     elif procedure == 'services.app.inspectService':
@@ -245,7 +251,13 @@ class ResponsesTest(unittest.TestCase):
                     for case in ['matching', 'type', 'repo', 'ref', 'path']
                     for procedure in ['updateSourceGit', 'inspectService']
                 ])
-                self.assertEqual(len(received) - len(git_requests), 298)
+                github_requests = [path for path, _, _ in received if path.startswith('/github-ack/')]
+                self.assertEqual(github_requests, [
+                    f'/github-ack/{case}/api/trpc/services.app.{procedure}'
+                    for case in ['matching', 'type', 'owner', 'repo', 'ref', 'path']
+                    for procedure in ['updateSourceGithub', 'inspectService']
+                ])
+                self.assertEqual(len(received) - len(git_requests) - len(github_requests), 298)
                 runtime_requests = [(path, auth) for path, auth, _ in received if '/getDockerContainers?' in path]
                 self.assertEqual(len(runtime_requests), 7)
                 self.assertTrue(all(auth == 'Bearer synthetic-authorization-secret' for _, auth in runtime_requests))

@@ -291,7 +291,7 @@ final class EasyPanelClient
         string $ref,
         string $path,
     ): void {
-        $this->call('services.app.updateSourceGithub', [
+        $result = $this->call('services.app.updateSourceGithub', [
             'projectName' => $projectName,
             'serviceName' => $serviceName,
             'owner' => $owner,
@@ -299,6 +299,17 @@ final class EasyPanelClient
             'ref' => $ref,
             'path' => $path,
         ]);
+        if ($result instanceof \stdClass && (array) $result === []) {
+            $inspection = $this->inspectAppService($projectName, $serviceName);
+            $source = $inspection['source'] ?? null;
+            if (($source['type'] ?? null) !== 'github'
+                || ($source['owner'] ?? null) !== $owner
+                || ($source['repo'] ?? null) !== $repo
+                || ($source['ref'] ?? null) !== $ref
+                || ($source['path'] ?? null) !== $path) {
+                throw new \RuntimeException('EasyPanel GitHub source update could not be verified.');
+            }
+        }
     }
 
     public function updateDockerfileSource(string $projectName, string $serviceName, string $dockerfile): void
@@ -607,6 +618,7 @@ final class EasyPanelClient
             'services.app.updateDeploy',
             'services.app.updateSourceImage',
             'services.app.updateSourceGit',
+            'services.app.updateSourceGithub',
             'services.app.updateSourceDockerfile',
             'services.app.updateEnv',
             'services.app.destroyService',
