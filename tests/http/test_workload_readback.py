@@ -78,7 +78,12 @@ class WorkloadReadbackTest(unittest.TestCase):
                         calls = traces[(workload, case)]
                         self.assertEqual(calls.count('services.' + ('app' if workload == 'worker' else 'box') + '.updateEnv:' + ('worker-default' if workload == 'worker' else 'scheduler')), 1, (workload, case, calls))
                         self.assertGreaterEqual(calls.count('services.' + ('app' if workload == 'worker' else 'box') + '.inspectService:' + ('worker-default' if workload == 'worker' else 'scheduler')), 1)
-                        self.assertLess(calls.index('services.' + ('app' if workload == 'worker' else 'box') + '.updateEnv:' + ('worker-default' if workload == 'worker' else 'scheduler')), calls.index('services.' + ('app' if workload == 'worker' else 'box') + '.inspectService:' + ('worker-default' if workload == 'worker' else 'scheduler')))
+                        service_type, service_name = ('app', 'worker-default') if workload == 'worker' else ('box', 'scheduler')
+                        update_index = calls.index(f'services.{service_type}.updateEnv:{service_name}')
+                        readback_index = calls.index(f'services.{service_type}.inspectService:{service_name}', update_index + 1)
+                        trigger = 'services.app.deployService:worker-default' if workload == 'worker' else 'services.box.updateScripts:scheduler'
+                        if trigger in calls:
+                            self.assertLess(readback_index, calls.index(trigger))
                         if workload == 'worker':
                             self.assertEqual('services.app.deployService:worker-default' in calls, case in ['saved', 'saved-flat'])
                             if case not in ['saved', 'saved-flat']:
