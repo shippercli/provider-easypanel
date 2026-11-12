@@ -368,7 +368,14 @@ final class EasyPanelClient
 
         $response = $this->post('/api/trpc/'.$procedure, $this->authToken, ['json' => (object) $input]);
 
-        return $this->decodeResponse($response, $procedure);
+        try {
+            return $this->decodeResponse($response, $procedure);
+        } catch (\RuntimeException $exception) {
+            if (\preg_match('~\A[a-zA-Z.]+\z~', $procedure) === 1) {
+                fwrite(STDERR, "EasyPanel operation returned an unreadable response: {$procedure}\n");
+            }
+            throw $exception;
+        }
     }
 
     /** @param array<string, mixed> $input */

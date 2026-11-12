@@ -15,31 +15,7 @@ if (! is_string($url) || $url === '' || ! is_string($token) || $token === '') {
 
 $client = new EasyPanelClient($url, $token);
 $recover = $argv === [$argv[0], '--recover-failed-probe'];
-if ($recover) {
-    // This name was recorded before project creation in Actions run 43213872024.
-    $project = 'shippercli-create-probe-69db3a9891428387';
-    $inventory = $client->listProjectsAndServices();
-    if (! in_array($project, array_column($inventory['projects'], 'name'), true)) {
-        echo "Disposable project is already absent.\n";
-        exit(0);
-    }
-
-    foreach ($inventory['services'] as $entry) {
-        if ($entry['projectName'] === $project) {
-            throw new RuntimeException('The failed probe project contains a service. Inspect it before cleanup.');
-        }
-    }
-
-    $client->call('projects.destroyProject', ['name' => $project]);
-    if (in_array($project, array_column($client->listProjectsAndServices()['projects'], 'name'), true)) {
-        throw new RuntimeException('Disposable project still exists after recovery.');
-    }
-
-    echo "Disposable project recovery verified.\n";
-    exit(0);
-}
-
-if (count($argv) !== 1) {
+if (! $recover && count($argv) !== 1) {
     throw new InvalidArgumentException('Unknown probe arguments.');
 }
 
@@ -61,6 +37,38 @@ $request = static function (string $route, ?array $payload = null) use ($url, $t
     }
     return $body;
 };
+
+if ($recover) {
+    // Exact disposable project logged by run 43218154916.
+    $project = 's-ebe13de211a69-v1-46606c607e4e596056ee';
+    $inventory = $client->listProjectsAndServices();
+    if (! in_array($project, array_column($inventory['projects'], 'name'), true)) {
+        echo "Disposable project is already absent.\n";
+        exit(0);
+    }
+
+    foreach ($inventory['services'] as $entry) {
+        if ($entry['projectName'] !== $project) {
+            continue;
+        }
+        if ($entry['name'] !== 'web' || $entry['type'] !== 'app') {
+            throw new RuntimeException('Unexpected service in disposable project. Manual review required.');
+        }
+        $inspection = $client->inspectAppService($project, 'web');
+        $env = is_string($inspection['env'] ?? null) ? preg_split('/\R/', $inspection['env']) : [];
+        if (! in_array('SHIPPERCLI_MANAGED=1', $env ?: [], true)
+            || ! in_array('SHIPPERCLI_MANAGED_PROJECT='.$project, $env ?: [], true)) {
+            throw new RuntimeException('Disposable app ownership could not be confirmed. Manual review required.');
+        }
+    }
+
+    $request('destroyProject', ['name' => $project]);
+    if (in_array($project, array_column($client->listProjectsAndServices()['projects'], 'name'), true)) {
+        throw new RuntimeException('Disposable project still exists after recovery.');
+    }
+    echo "Disposable lifecycle project recovery verified.\n";
+    exit(0);
+}
 
 $project = 'shippercli-create-probe-'.bin2hex(random_bytes(8));
 $service = 'probe';
