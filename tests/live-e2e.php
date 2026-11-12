@@ -171,18 +171,19 @@ $runShipper = static function (array $arguments) use ($shipper): void {
     }
 };
 if ($published) {
-    foreach (['shippercli/cli' => '1.0.5', 'shippercli/provider-easypanel' => '2.0.4'] as $package => $version) {
+    $packages = [
+        'shippercli/cli' => [getenv('SHIPPER_E2E_CLI_VERSION'), getenv('SHIPPER_E2E_CLI_SHA')],
+        'shippercli/provider-easypanel' => [getenv('SHIPPER_E2E_PROVIDER_VERSION'), getenv('SHIPPER_E2E_PROVIDER_SHA')],
+    ];
+    foreach ($packages as $package => [$version, $reference]) {
         $installed = Composer\InstalledVersions::getPrettyVersion($package);
         if (! is_string($installed) || ltrim($installed, 'v') !== $version) {
             throw new RuntimeException('Unexpected published version for '.$package);
         }
-        echo $package.' '.$installed.' '.Composer\InstalledVersions::getReference($package).PHP_EOL;
-    }
-    if (Composer\InstalledVersions::getReference('shippercli/cli') !== '5256b2a721cfcac45bb15f5814726e4ac35d3801') {
-        throw new RuntimeException('Unexpected published Shipper CLI source reference.');
-    }
-    if (Composer\InstalledVersions::getReference('shippercli/provider-easypanel') !== '2850f2d3dc303e9e05f79d444a01723ef730cc42') {
-        throw new RuntimeException('Unexpected published EasyPanel source reference.');
+        if (! is_string($reference) || $reference === '' || Composer\InstalledVersions::getReference($package) !== $reference) {
+            throw new RuntimeException('Unexpected published source reference for '.$package);
+        }
+        echo $package.' '.$installed.' '.$reference.PHP_EOL;
     }
     if ($withDatabase) {
         $fixture = Symfony\Component\Yaml\Yaml::parseFile('shipper.yml');
