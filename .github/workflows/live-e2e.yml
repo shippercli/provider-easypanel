@@ -7,6 +7,10 @@ on:
         description: Check ownership marker persistence on a disposable app
         type: boolean
         default: false
+      recover-failed-probe:
+        description: Recover the disposable project from run 43213872024
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -23,7 +27,7 @@ concurrency:
 
 jobs:
   deploy-demo:
-    if: github.ref == 'refs/heads/main' && !inputs.probe-create-env
+    if: github.ref == 'refs/heads/main' && !inputs.probe-create-env && !inputs.recover-failed-probe
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -40,7 +44,7 @@ jobs:
         run: php tests/live-e2e.php
 
   probe-create-env:
-    if: github.event_name == 'workflow_dispatch' && inputs.probe-create-env && github.ref == 'refs/heads/codex/easypanel-create-probe'
+    if: github.event_name == 'workflow_dispatch' && (inputs.probe-create-env || inputs.recover-failed-probe) && github.ref == 'refs/heads/codex/easypanel-create-probe'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -54,4 +58,8 @@ jobs:
           coverage: none
       - run: composer install --no-interaction --prefer-dist
       - name: Check environment persistence at app creation
+        if: inputs.probe-create-env && !inputs.recover-failed-probe
         run: php tests/live-create-env.php
+      - name: Recover the failed probe
+        if: inputs.recover-failed-probe
+        run: php tests/live-create-env.php --recover-failed-probe

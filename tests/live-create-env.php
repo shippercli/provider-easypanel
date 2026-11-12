@@ -14,6 +14,35 @@ if (! is_string($url) || $url === '' || ! is_string($token) || $token === '') {
 }
 
 $client = new EasyPanelClient($url, $token);
+$recover = $argv === [$argv[0], '--recover-failed-probe'];
+if ($recover) {
+    // This name was recorded before project creation in Actions run 43213872024.
+    $project = 'shippercli-create-probe-69db3a9891428387';
+    $inventory = $client->listProjectsAndServices();
+    if (! in_array($project, array_column($inventory['projects'], 'name'), true)) {
+        echo "Disposable project is already absent.\n";
+        exit(0);
+    }
+
+    foreach ($inventory['services'] as $entry) {
+        if ($entry['projectName'] === $project) {
+            throw new RuntimeException('The failed probe project contains a service. Inspect it before cleanup.');
+        }
+    }
+
+    $client->destroyProject($project);
+    if (in_array($project, array_column($client->listProjectsAndServices()['projects'], 'name'), true)) {
+        throw new RuntimeException('Disposable project still exists after recovery.');
+    }
+
+    echo "Disposable project recovery verified.\n";
+    exit(0);
+}
+
+if (count($argv) !== 1) {
+    throw new InvalidArgumentException('Unknown probe arguments.');
+}
+
 $project = 'shippercli-create-probe-'.bin2hex(random_bytes(8));
 $service = 'probe';
 $marker = 'SHIPPERCLI_MANAGED_PROJECT='.$project;
