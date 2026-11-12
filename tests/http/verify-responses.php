@@ -31,6 +31,17 @@ foreach ([301, 302, 303, 307, 308, 400, 401, 403, 404, 422, 429, 500, 502] as $s
         }
     }
 }
+try {
+    $client->deployAppService('fixture', 'web');
+    throw new LogicException('Expected deployment to fail.');
+} catch (RuntimeException $exception) {
+    if ($exception->getCode() !== 400
+        || !str_contains($exception->getMessage(), 'Check its GitHub settings.')
+        || str_contains($exception->getMessage(), 'synthetic-error-secret')) {
+        throw new RuntimeException('Expected a sanitized GitHub deployment hint.');
+    }
+}
+
 foreach (['matching', 'different', 'unrelated'] as $case) {
     $api = new EasyPanelClient($argv[1].'/image-ack/'.$case, 'synthetic-authorization-secret');
     $failed = false;

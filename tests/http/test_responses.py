@@ -208,6 +208,9 @@ class ResponsesTest(unittest.TestCase):
                         'empty': (204, b''),
                         'missing': (404, b'null'),
                     }[case]
+                elif self.path == '/api/trpc/services.app.deployService':
+                    status = 400
+                    payload = json.dumps({'error': {'json': {'message': 'GitHub token rejected: synthetic-error-secret'}}}).encode()
                 elif procedure.startswith('status-'):
                     _, status, format_ = procedure.split('-')
                     status = int(status)
@@ -257,7 +260,7 @@ class ResponsesTest(unittest.TestCase):
                     for case in ['matching', 'type', 'owner', 'repo', 'ref', 'path']
                     for procedure in ['updateSourceGithub', 'inspectService']
                 ])
-                self.assertEqual(len(received) - len(git_requests) - len(github_requests), 298)
+                self.assertEqual(len(received) - len(git_requests) - len(github_requests), 299)
                 runtime_requests = [(path, auth) for path, auth, _ in received if '/getDockerContainers?' in path]
                 self.assertEqual(len(runtime_requests), 7)
                 self.assertTrue(all(auth == 'Bearer synthetic-authorization-secret' for _, auth in runtime_requests))
