@@ -295,7 +295,13 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             }
 
             if ($service === null) {
-                $client->createAppService($projectName, $serviceName);
+                $client->createAppService($projectName, $serviceName, self::MANAGED_MARKER."\nSHIPPERCLI_MANAGED_PROJECT={$projectName}");
+                $inspection = $client->inspectAppService($projectName, $serviceName);
+                $existingEnvironment = \is_string($inspection['env'] ?? null) ? $inspection['env'] : '';
+                if (! $this->hasEnvironmentLine($existingEnvironment, self::MANAGED_MARKER)
+                    || ! $this->hasEnvironmentLine($existingEnvironment, 'SHIPPERCLI_MANAGED_PROJECT='.$projectName)) {
+                    throw new \RuntimeException('EasyPanel did not persist Shipper ownership markers at app creation.');
+                }
             }
 
             $databaseEnvironment = $this->applyDatabases(
@@ -407,10 +413,16 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             }
             if ($this->booleanConfig('destroy_project', true)) {
                 if (! $this->projectHasServices($remaining, $projectName)) {
-                    $client->destroyProject($projectName);
+                    $deletionError = null;
+                    try {
+                        $client->destroyProject($projectName);
+                    } catch (\RuntimeException $exception) {
+                        // EasyPanel can delete the project even when its response cannot be decoded.
+                        $deletionError = $exception;
+                    }
                     $afterProject = $client->listProjectsAndServices();
                     if ($this->projectExists($afterProject, $projectName)) {
-                        throw new \RuntimeException('EasyPanel project deletion remains unconfirmed; the project is still visible. Recheck before retrying.');
+                        throw $deletionError ?? new \RuntimeException('EasyPanel project deletion remains unconfirmed; the project is still visible. Recheck before retrying.');
                     }
                 }
             }
@@ -622,14 +634,11 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             if ($worker !== null && ($worker['type'] ?? null) !== 'app') {
                 throw new \RuntimeException("EasyPanel worker service {$workerName} is not an app service.");
             }
-            $existingEnvironment = '';
-            if ($worker !== null) {
-                $inspected = $client->inspectAppService($projectName, $workerName);
-                $existingEnvironment = $this->ownedWorkloadEnvironment($inspected, $projectName, 'WORKER', $workerName);
-            }
             if ($worker === null) {
-                $client->createAppService($projectName, $workerName);
+                $client->createAppService($projectName, $workerName, self::MANAGED_MARKER."\nSHIPPERCLI_MANAGED_PROJECT={$projectName}\nSHIPPERCLI_MANAGED_WORKER={$workerName}");
             }
+            $inspected = $client->inspectAppService($projectName, $workerName);
+            $existingEnvironment = $this->ownedWorkloadEnvironment($inspected, $projectName, 'WORKER', $workerName);
 
             $this->configureSource($client, $projectName, $workerName, $source, $profile);
             $this->writeVerifiedEnvironment($client, $project, $projectName, $workerName, $this->environment($projectName, $profile, $databaseEnvironment, $existingEnvironment, $project)."\nSHIPPERCLI_MANAGED_WORKER={$workerName}");

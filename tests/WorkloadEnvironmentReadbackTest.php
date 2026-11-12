@@ -12,6 +12,7 @@ final class WorkloadEnvironmentReadbackTest extends TestCase
     {
         $cases = [];
         foreach (['worker', 'scheduler'] as $kind) foreach (['saved', 'ignored', 'malformed'] as $mode) $cases[] = [$kind, $mode];
+        $cases[] = ['worker', 'creation-ignored'];
         return $cases;
     }
 
@@ -25,7 +26,11 @@ final class WorkloadEnvironmentReadbackTest extends TestCase
         $calls = [];
         $client = new EasyPanelClient('https://fixture.test', 'synthetic', transport: static function ($procedure, $input) use (&$env, &$calls, $type, $name, $mode): array {
             $calls[] = $procedure;
-            if ($procedure === 'projects.listProjectsAndServices') return ['projects' => [['name' => 'fixture']], 'services' => [['projectName' => 'fixture', 'name' => $name, 'type' => $type]]];
+            if ($procedure === 'projects.listProjectsAndServices') return ['projects' => [['name' => 'fixture']], 'services' => $mode === 'creation-ignored' ? [] : [['projectName' => 'fixture', 'name' => $name, 'type' => $type]]];
+            if ($procedure === 'createAppService') {
+                self::assertSame("SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=fixture\nSHIPPERCLI_MANAGED_WORKER={$name}", $input['env']);
+                $env = '';
+            }
             if (str_ends_with($procedure, '.inspectService')) return ['env' => $type === 'box' ? ['content' => $env] : $env];
             if (str_ends_with($procedure, '.updateEnv') && $mode !== 'ignored') {
                 $value = $input['env'];
@@ -44,6 +49,11 @@ final class WorkloadEnvironmentReadbackTest extends TestCase
         try {
             (new \ReflectionMethod($provider, $kind === 'worker' ? 'applyWorkers' : 'applyCron'))->invoke($provider, $client, $project, $profile, 'fixture', ['type' => 'git', 'repo' => 'https://github.com/example/app.git']);
         } catch (\RuntimeException $exception) { $failure = $exception; }
+        if ($mode === 'creation-ignored') {
+            self::assertInstanceOf(\RuntimeException::class, $failure);
+            self::assertSame(['projects.listProjectsAndServices', 'projects.listProjectsAndServices', 'createAppService', 'services.app.inspectService'], $calls);
+            return;
+        }
         self::assertSame($mode === 'saved', $failure === null);
         if ($failure === null) {
             self::assertSame(2, count(array_filter($calls, static fn ($call) => str_ends_with($call, '.inspectService'))));

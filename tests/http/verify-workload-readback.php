@@ -21,7 +21,7 @@ foreach (['worker', 'scheduler'] as $workload) {
             }] : []; }
         };
         $profile = new class { public function name(): string { return 'production'; } public function branch(): string { return 'main'; } public function get(string $key): mixed { return null; } };
-        $client = new EasyPanelClient($argv[1].'/'.$workload.'/'.$case, 'synthetic-authorization-secret');
+        $client = new EasyPanelClient($argv[1].'/'.$workload.'/'.$case.'/shipper-fixture-production-7981af8095df950702be', 'synthetic-authorization-secret');
         $provider = new EasyPanelProvider($config, $client);
         $result = $provider->apply($project, $profile);
         if ($result !== in_array($case, ['saved', 'saved-flat'], true)) throw new RuntimeException("Unexpected {$workload} apply result: {$case}");

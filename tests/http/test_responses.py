@@ -135,6 +135,13 @@ class ResponsesTest(unittest.TestCase):
                         data['services'].append(dict(service, projectName='second'))
                     envelope = {'json': data} if format_ == 'direct' else {'result': {'data': {'json': data}}}
                     status, payload = 200, json.dumps(envelope).encode()
+                elif self.path.startswith('/owned-app/'):
+                    case = self.path.split('/')[2]
+                    status, payload = {
+                        'success': (200, b'null'),
+                        'unexpected': (200, b'{"error":"synthetic-error-secret"}'),
+                        'missing': (404, b'null'),
+                    }[case]
                 elif procedure.startswith('status-'):
                     _, status, format_ = procedure.split('-')
                     status = int(status)
@@ -166,8 +173,14 @@ class ResponsesTest(unittest.TestCase):
                     procedures = [path.rsplit('/', 1)[-1] for path, _, _ in received if path.startswith('/workload-delete/' + kind + '/malformed/')]
                     self.assertEqual(len(procedures), 1)
                     self.assertTrue(procedures[0].endswith('.inspectService'))
-                self.assertEqual(len(received), 252)
-                self.assertTrue(all(auth == 'synthetic-authorization-secret' for _, auth, _ in received))
+                owned_requests = [(path, auth, body) for path, auth, body in received if path.startswith('/owned-app/')]
+                self.assertEqual(len(owned_requests), 3)
+                for path, auth, body in owned_requests:
+                    self.assertTrue(path.endswith('/api/createAppService'))
+                    self.assertEqual(auth, 'Bearer synthetic-authorization-secret')
+                    self.assertEqual(json.loads(body), {'projectName': 'fixture', 'serviceName': 'web', 'env': 'SHIPPERCLI_MANAGED=1'})
+                self.assertEqual(len(received), 255)
+                self.assertTrue(all(auth == 'synthetic-authorization-secret' for path, auth, _ in received if not path.startswith('/owned-app/')))
                 self.assertEqual(sum(b'synthetic-body-secret' in body for _, _, body in received), 26)
                 for case in ['absent', 'retain-project', 'other-service', 'pending-app', 'pending-project', 'unreadable']:
                     procedures = [path.rsplit('/', 1)[-1] for path, _, _ in received if path.startswith('/cleanup/' + case + '/')]

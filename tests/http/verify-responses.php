@@ -45,6 +45,20 @@ if ($failure === null || !str_contains($failure->getMessage(), 'transport error 
 }
 echo "26 non-success status checks and two successful response controls passed\n";
 
+foreach (['success', 'unexpected', 'missing'] as $case) {
+    $api = new EasyPanelClient($argv[1].'/owned-app/'.$case, 'synthetic-authorization-secret');
+    $failure = null;
+    try {
+        $api->createAppService('fixture', 'web', 'SHIPPERCLI_MANAGED=1');
+    } catch (RuntimeException $exception) {
+        $failure = $exception;
+    }
+    if (($failure === null) !== ($case === 'success')
+        || ($failure !== null && str_contains($failure->getMessage(), 'synthetic-error-secret'))) {
+        throw new RuntimeException('Unexpected result for owned app creation: '.$case);
+    }
+}
+
 foreach (['direct', 'nested'] as $format) {
     foreach (['duplicate-project', 'padded-project', 'duplicate-service', 'conflicting-type', 'orphan', 'padded-service', 'padded-parent', 'padded-type', 'valid'] as $case) {
         $api = new EasyPanelClient($argv[1].'/inventory/'.$case.'/'.$format, 'synthetic-authorization-secret');
