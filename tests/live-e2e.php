@@ -16,16 +16,17 @@ if (! is_string($url) || $url === '' || ! is_string($token) || $token === '') {
 
 $withDatabase = $argv === [$argv[0], '--disposable-database'];
 $recoverDatabase = $argv === [$argv[0], '--recover-disposable-database'];
+$legacyGuard = $argv === [$argv[0], '--disposable-legacy-guard'];
 $disposable = $withDatabase || $argv === [$argv[0], '--disposable'];
-if (! $disposable && ! $recoverDatabase && count($argv) !== 1) {
+if (! $disposable && ! $recoverDatabase && ! $legacyGuard && count($argv) !== 1) {
     throw new InvalidArgumentException('Unknown live test arguments.');
 }
 $name = match (true) {
     $recoverDatabase => 'eba8db18205cf',
-    $disposable => 'e'.bin2hex(random_bytes(6)),
+    $disposable || $legacyGuard => 'e'.bin2hex(random_bytes(6)),
     default => 'provider',
 };
-$prefix = $disposable || $recoverDatabase ? 's-' : 'shippercli-demo-';
+$prefix = $disposable || $recoverDatabase || $legacyGuard ? 's-' : 'shippercli-demo-';
 $expectedProject = $prefix.$name.'-v1-'.substr(hash('sha256', json_encode([$name, 'v1'], JSON_THROW_ON_ERROR)), 0, 20);
 $expectedService = 'web';
 $client = new EasyPanelClient($url, $token, timeout: 45);
@@ -121,6 +122,62 @@ if ($recoverDatabase) {
         throw new RuntimeException('Disposable MySQL recovery failed: '.$provider->getLastError());
     }
     echo "Disposable MySQL project recovery verified.\n";
+    exit(0);
+}
+if ($legacyGuard) {
+    $legacyName = $prefix.$name.'-v1';
+    $projectNames = static fn (): array => array_column($client->listProjectsAndServices()['projects'], 'name');
+    $before = $projectNames();
+    if (in_array($legacyName, $before, true) || in_array($expectedProject, $before, true)) {
+        throw new RuntimeException('A disposable legacy fixture name is already in use.');
+    }
+
+    echo "Disposable legacy project: {$legacyName}\n";
+    try {
+        $client->createProject($legacyName);
+    } catch (RuntimeException $error) {
+        if (in_array($legacyName, $projectNames(), true)) {
+            throw new RuntimeException('The disposable legacy project appeared after an unconfirmed creation. Verify ownership before recovery.', previous: $error);
+        }
+        throw $error;
+    }
+    try {
+        $plan = $provider->plan($project, $profile);
+        if (($plan['blocked'] ?? false) !== true
+            || ! str_contains(implode(' ', $plan['actions'] ?? []), 'legacy EasyPanel project')) {
+            throw new RuntimeException('The live plan did not identify the legacy project as blocked.');
+        }
+        if ($provider->apply($project, $profile)
+            || ! str_contains($provider->getLastError(), 'legacy EasyPanel project')) {
+            throw new RuntimeException('Apply did not refuse the ambiguous legacy project.');
+        }
+        if ($provider->destroy($project, $profile)
+            || ! str_contains($provider->getLastError(), 'legacy EasyPanel project')) {
+            throw new RuntimeException('Destroy did not refuse the ambiguous legacy project.');
+        }
+        $after = $projectNames();
+        if (! in_array($legacyName, $after, true) || in_array($expectedProject, $after, true)) {
+            throw new RuntimeException('Legacy fixture was not preserved or a scoped replacement appeared.');
+        }
+        echo "Plan, apply and destroy blocked the legacy fixture and preserved it without a scoped replacement.\n";
+    } finally {
+        $inventory = $client->listProjectsAndServices();
+        if (in_array($legacyName, array_column($inventory['services'], 'projectName'), true)) {
+            throw new RuntimeException('Unexpected service in the empty legacy fixture. Manual review required.');
+        }
+        $deletionError = null;
+        if (in_array($legacyName, array_column($inventory['projects'], 'name'), true)) {
+            try {
+                $client->destroyProject($legacyName);
+            } catch (RuntimeException $error) {
+                $deletionError = $error;
+            }
+        }
+        if (in_array($legacyName, $projectNames(), true)) {
+            throw new RuntimeException('Disposable legacy fixture removal could not be verified.', previous: $deletionError);
+        }
+        echo "Disposable legacy fixture cleanup verified.\n";
+    }
     exit(0);
 }
 if ($disposable && $projectExists()) {
