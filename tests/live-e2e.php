@@ -176,6 +176,17 @@ if ($published) {
     if (Composer\InstalledVersions::getReference('shippercli/provider-easypanel') !== '2850f2d3dc303e9e05f79d444a01723ef730cc42') {
         throw new RuntimeException('Unexpected published EasyPanel source reference.');
     }
+    if ($withDatabase) {
+        $fixture = Symfony\Component\Yaml\Yaml::parseFile('shipper.yml');
+        $definition = $fixture['projects'][$name]['databases']['fixture'] ?? null;
+        if (($definition['type'] ?? null) !== $database) {
+            throw new RuntimeException('The published fixture does not declare the expected datastore.');
+        }
+        $dockerfile = $fixture['providers']['easypanel']['source']['dockerfile'] ?? '';
+        if (rtrim($dockerfile, "\n") !== rtrim($source['dockerfile'], "\n")) {
+            throw new RuntimeException('The published fixture Dockerfile differs from the source lifecycle fixture.');
+        }
+    }
     $runShipper(['validate']);
     $runShipper(['plan', $name, '--profile=v1']);
 }
@@ -225,6 +236,26 @@ try {
         throw new RuntimeException('The Shipper ownership markers were not applied to the disposable service.');
     }
 
+    if ($withDatabase) {
+        $services = array_filter($inventory['services'], static fn (array $service): bool =>
+            $service['projectName'] === $expectedProject
+            && $service['name'] === 'db-fixture'
+            && $service['type'] === $database
+        );
+        if ($services === []) {
+            throw new RuntimeException('The expected disposable datastore was not created.');
+        }
+        foreach (['HOST', 'USERNAME', 'PASSWORD', 'DATABASE'] as $field) {
+            if (preg_match('/^DB_'.$field.'=.+$/m', $env) !== 1) {
+                throw new RuntimeException('The disposable app is missing DB_'.$field.'.');
+            }
+        }
+        if ($database === 'redis' && ! in_array('DB_USERNAME=default', preg_split('/\R/', $env) ?: [], true)) {
+            throw new RuntimeException('The disposable app was configured with an unexpected Redis ACL username.');
+        }
+        echo "Disposable datastore service and application environment verified.\n";
+    }
+
     $domainHost = null;
     foreach ($client->listDomains($expectedProject, $expectedService) as $domain) {
         if (
@@ -257,6 +288,7 @@ try {
         ]);
         $body = curl_exec($handle);
         $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+        $curlError = curl_errno($handle);
         unset($handle);
 
         if ($status === 200 && is_string($body) && str_contains($body, $expectedBody)) {
@@ -268,7 +300,11 @@ try {
     }
 
     if (! $ready) {
-        throw new RuntimeException('The Shipper disposable service did not become ready.');
+        throw new RuntimeException(sprintf(
+            'The Shipper disposable service did not become ready (last HTTP status: %d, cURL error: %d).',
+            $status,
+            $curlError,
+        ));
     }
 
     echo "EasyPanel disposable deployment is ready.\n";
