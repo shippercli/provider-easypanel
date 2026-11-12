@@ -18,8 +18,8 @@ $sourceType = getenv('SHIPPER_E2E_SOURCE') ?: 'image';
 if ($scheduler && ($worker || $sourceType !== 'git')) {
     throw new RuntimeException('The scheduler fixture requires a public Git deployment without a queue worker.');
 }
-if ($withDatabase && ($published || $worker || $scheduler || $sourceType !== 'image')) {
-    throw new RuntimeException('The database fixture requires a standalone source checkout dispatch.');
+if ($withDatabase && ($worker || $scheduler || $sourceType !== 'image' || ($published && $database !== 'redis'))) {
+    throw new RuntimeException('The database fixture requires an image dispatch. Published database verification supports Redis.');
 }
 $expectedBody = match (true) {
     $withDatabase => 'shippercli-'.$database.'-query-ok',
@@ -166,15 +166,29 @@ $runShipper = static function (array $arguments) use ($shipper): void {
     }
 };
 if ($published) {
-    foreach (['shippercli/cli' => '1.0.4', 'shippercli/provider-easypanel' => '2.0.3'] as $package => $version) {
+    foreach (['shippercli/cli' => '1.0.5', 'shippercli/provider-easypanel' => '2.0.4'] as $package => $version) {
         $installed = Composer\InstalledVersions::getPrettyVersion($package);
         if (! is_string($installed) || ltrim($installed, 'v') !== $version) {
             throw new RuntimeException('Unexpected published version for '.$package);
         }
         echo $package.' '.$installed.' '.Composer\InstalledVersions::getReference($package).PHP_EOL;
     }
-    if (Composer\InstalledVersions::getReference('shippercli/provider-easypanel') !== 'd28bd36a0390ce15f3c65e8fcd46f5e712be71a6') {
+    if (Composer\InstalledVersions::getReference('shippercli/cli') !== '5256b2a721cfcac45bb15f5814726e4ac35d3801') {
+        throw new RuntimeException('Unexpected published Shipper CLI source reference.');
+    }
+    if (Composer\InstalledVersions::getReference('shippercli/provider-easypanel') !== '2850f2d3dc303e9e05f79d444a01723ef730cc42') {
         throw new RuntimeException('Unexpected published EasyPanel source reference.');
+    }
+    if ($withDatabase) {
+        $fixture = Symfony\Component\Yaml\Yaml::parseFile('shipper.yml');
+        $definition = $fixture['projects'][$name]['databases']['fixture'] ?? null;
+        if (($definition['type'] ?? null) !== $database) {
+            throw new RuntimeException('The published fixture does not declare the expected datastore.');
+        }
+        $dockerfile = $fixture['providers']['easypanel']['source']['dockerfile'] ?? '';
+        if (rtrim($dockerfile, "\n") !== rtrim($source['dockerfile'], "\n")) {
+            throw new RuntimeException('The published fixture Dockerfile differs from the source lifecycle fixture.');
+        }
     }
     $runShipper(['validate']);
     $runShipper(['plan', $name, '--profile=v1']);
@@ -225,6 +239,26 @@ try {
         throw new RuntimeException('The Shipper ownership markers were not applied to the disposable service.');
     }
 
+    if ($withDatabase) {
+        $services = array_filter($inventory['services'], static fn (array $service): bool =>
+            $service['projectName'] === $expectedProject
+            && $service['name'] === 'db-fixture'
+            && $service['type'] === $database
+        );
+        if ($services === []) {
+            throw new RuntimeException('The expected disposable datastore was not created.');
+        }
+        foreach (['HOST', 'USERNAME', 'PASSWORD', 'DATABASE'] as $field) {
+            if (preg_match('/^DB_'.$field.'=.+$/m', $env) !== 1) {
+                throw new RuntimeException('The disposable app is missing DB_'.$field.'.');
+            }
+        }
+        if ($database === 'redis' && ! in_array('DB_USERNAME=default', preg_split('/\R/', $env) ?: [], true)) {
+            throw new RuntimeException('The disposable app was configured with an unexpected Redis ACL username.');
+        }
+        echo "Disposable datastore service and application environment verified.\n";
+    }
+
     $domainHost = null;
     foreach ($client->listDomains($expectedProject, $expectedService) as $domain) {
         if (
@@ -257,6 +291,7 @@ try {
         ]);
         $body = curl_exec($handle);
         $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+        $curlError = curl_errno($handle);
         unset($handle);
 
         if ($status === 200 && is_string($body) && str_contains($body, $expectedBody)) {
@@ -268,7 +303,11 @@ try {
     }
 
     if (! $ready) {
-        throw new RuntimeException('The Shipper disposable service did not become ready.');
+        throw new RuntimeException(sprintf(
+            'The Shipper disposable service did not become ready (last HTTP status: %d, cURL error: %d).',
+            $status,
+            $curlError,
+        ));
     }
 
     echo "EasyPanel disposable deployment is ready.\n";
@@ -385,6 +424,9 @@ try {
     // Omit the declared database so destroy reconciles the disposable, marker-owned service.
     $cleanupProject = $withDatabase ? new ($project::class)($name, false, false, $schedulerCommand, 'none') : $project;
     if ($published) {
+        if ($withDatabase && ! rename('shipper-cleanup.yml', 'shipper.yml')) {
+            throw new RuntimeException('Unable to switch to the disposable cleanup configuration.');
+        }
         $runShipper(['destroy', $name, '--profile=v1', '--force']);
     } elseif (! $provider->destroy($cleanupProject, $profile)) {
         if (! $scheduler || ! $applyFailed) {

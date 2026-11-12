@@ -29,6 +29,8 @@ EasyPanel may provide those capabilities in its UI, but this package does not cl
 
 ## Database connection variables
 
+Use Shipper CLI 1.0.5 or later when declaring EasyPanel databases in `shipper.yml`.
+
 A single newly created database supplies `DB_HOST`, `DB_DATABASE`, `DB_USERNAME`,
 and `DB_PASSWORD` to the application. Multiple database declarations require an
 explicit unique prefix for every database name in the provider configuration:
@@ -364,7 +366,8 @@ another database. Missing, incomplete, or mismatched readback stops apply with a
 fixed diagnostic. Earlier confirmed credentials can therefore survive a later
 creation failure and be reused by a fresh provider instance without recreating
 the first database. Local transport regressions cover this retry and ignored or
-malformed environment writes; live database connectivity remains unverified.
+malformed environment writes. Disposable live fixtures verify authenticated queries
+for MariaDB, PostgreSQL, MongoDB, and Redis.
 
 Creation and credential delivery are separate remote operations. A process crash,
 ambiguous create response or failed credential write can still leave a created
