@@ -242,7 +242,7 @@ if ($connection['DB_PASSWORD'] !== $literalPassword || $connection['DB_DATABASE'
 echo "Literal explicit password and normalized identity passed real HTTP creation\n";
 
 
-foreach (['running', 'missing', 'invalid', 'url'] as $case) {
+foreach (['running', 'missing', 'invalid', 'url', 'container', 'other', 'stopped', 'unavailable'] as $case) {
     $project = new class { public function name(): string { return 'fixture'; } };
     $profile = new class { public function name(): string { return 'production'; } };
     $temporary = new \ShipperCli\ProviderEasyPanel\EasyPanelProvider;
@@ -250,10 +250,10 @@ foreach (['running', 'missing', 'invalid', 'url'] as $case) {
     $api = new EasyPanelClient($argv[1].'/status-safety/'.$case.'/'.$name, 'synthetic-authorization-secret');
     $provider = new \ShipperCli\ProviderEasyPanel\EasyPanelProvider([], $api);
     $status = $provider->status($project, $profile);
-    if ($status['state'] !== ($case === 'running' ? 'running' : 'unknown')
+    if ($status['state'] !== (in_array($case, ['running', 'container'], true) ? 'running' : 'unknown')
         || str_contains(json_encode($status), 'synthetic-status-secret')
         || array_keys($status) !== ['provider', 'state', 'project', 'service']) {
         throw new RuntimeException('Status leaked inspection data or invented a successful state');
     }
 }
-echo "Four real HTTP status privacy and unknown-state controls passed\n";
+echo "Real HTTP status, runtime identity and privacy controls passed\n";

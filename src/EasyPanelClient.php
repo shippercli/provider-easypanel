@@ -399,32 +399,60 @@ final class EasyPanelClient
         return $this->decodeResponse($response, $procedure);
     }
 
+    public function hasRunningAppContainer(string $projectName, string $serviceName): bool
+    {
+        $identity = $projectName.'_'.$serviceName;
+        $query = ['service' => $identity];
+        $containers = $this->transport !== null
+            ? ($this->transport)('getDockerContainers', $query)
+            : \json_decode($this->request('/api/getDockerContainers?'.\http_build_query($query), 'Bearer '.$this->authToken));
+
+        if (! \is_array($containers) || ! \array_is_list($containers)) {
+            return false;
+        }
+
+        foreach ($containers as $container) {
+            if (($container->State ?? null) === 'running'
+                && ($container->Labels->{'com.docker.swarm.service.name'} ?? null) === $identity) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /** @param array<string, mixed> $input */
     private function post(string $path, #[\SensitiveParameter] string $authorization, #[\SensitiveParameter] array $input): string
+    {
+        return $this->request($path, $authorization, $input);
+    }
+
+    /** @param array<string, mixed>|null $input */
+    private function request(string $path, #[\SensitiveParameter] string $authorization, #[\SensitiveParameter] ?array $input = null): string
     {
         if (! \function_exists('curl_init')) {
             throw new \RuntimeException('The EasyPanel provider requires the PHP cURL extension.');
         }
 
-        $payload = \json_encode($input, JSON_THROW_ON_ERROR);
         $handle = \curl_init(\rtrim($this->baseUrl, '/').$path);
         if ($handle === false) {
             throw new \RuntimeException('Unable to initialize the EasyPanel API request.');
         }
 
-        \curl_setopt_array($handle, [
-            CURLOPT_POST => true,
+        $options = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => false,
-            CURLOPT_HTTPHEADER => [
-                'Authorization: '.$authorization,
-                'Content-Type: application/json',
-            ],
-            CURLOPT_POSTFIELDS => $payload,
+            CURLOPT_HTTPHEADER => ['Authorization: '.$authorization],
             CURLOPT_TIMEOUT => $this->timeout,
             CURLOPT_SSL_VERIFYPEER => $this->verifySsl,
             CURLOPT_SSL_VERIFYHOST => $this->verifySsl ? 2 : 0,
-        ]);
+        ];
+        if ($input !== null) {
+            $options[CURLOPT_POST] = true;
+            $options[CURLOPT_POSTFIELDS] = \json_encode($input, JSON_THROW_ON_ERROR);
+            $options[CURLOPT_HTTPHEADER][] = 'Content-Type: application/json';
+        }
+        \curl_setopt_array($handle, $options);
 
         $response = \curl_exec($handle);
         $status = (int) \curl_getinfo($handle, CURLINFO_RESPONSE_CODE);

@@ -999,10 +999,22 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
 
         $inspection = $this->getClient()->inspectAppService($projectName, $serviceName);
         $serviceState = $inspection['status'] ?? $inspection['state'] ?? null;
+        if (! is_string($serviceState) || preg_match('/\A[a-z][a-z0-9_-]{0,63}\z/i', $serviceState) !== 1) {
+            $serviceState = 'unknown';
+        }
+        if (strcasecmp($serviceState, 'unknown') === 0 && ($service['type'] ?? null) === 'app') {
+            try {
+                if ($this->getClient()->hasRunningAppContainer($projectName, $serviceName)) {
+                    $serviceState = 'running';
+                }
+            } catch (\RuntimeException) {
+                // Older panels or restricted tokens may not expose runtime inventory.
+            }
+        }
 
         return [
             'provider' => $this->getName(),
-            'state' => is_string($serviceState) && preg_match('/\A[a-z][a-z0-9_-]{0,63}\z/i', $serviceState) === 1 ? $serviceState : 'unknown',
+            'state' => $serviceState,
             'project' => $projectName,
             'service' => $serviceName,
         ];
