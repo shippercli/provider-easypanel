@@ -33,7 +33,7 @@ foreach (['matching', 'different', 'unrelated'] as $case) {
     $failed = false;
     try {
         if ($case === 'unrelated') {
-            $api->call('services.app.updateSourceGit');
+            $api->call('services.app.updateSourceGithub');
         } else {
             $api->updateImageSource('fixture', 'web', 'nginx:alpine');
         }
@@ -42,6 +42,22 @@ foreach (['matching', 'different', 'unrelated'] as $case) {
     }
     if ($failed !== ($case !== 'matching')) {
         throw new RuntimeException('Unexpected empty mutation acknowledgement result: '.$case);
+    }
+}
+
+foreach (['matching', 'type', 'repo', 'ref', 'path'] as $case) {
+    $api = new EasyPanelClient($argv[1].'/git-ack/'.$case, 'synthetic-authorization-secret');
+    $failed = false;
+    try {
+        $api->updateGitSource('fixture', 'web', 'https://example.test/app.git', 'main', '/app');
+    } catch (RuntimeException $exception) {
+        if ($exception->getMessage() !== 'EasyPanel Git source update could not be verified.') {
+            throw $exception;
+        }
+        $failed = true;
+    }
+    if ($failed !== ($case !== 'matching')) {
+        throw new RuntimeException('Unexpected Git source acknowledgement result: '.$case);
     }
 }
 

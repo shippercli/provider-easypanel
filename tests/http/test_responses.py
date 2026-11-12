@@ -89,6 +89,21 @@ class ResponsesTest(unittest.TestCase):
                         if case == 'different':
                             data['image'] = 'nginx:alpine'
                         payload = json.dumps({'json': data}).encode()
+                elif self.path.startswith('/git-ack/'):
+                    case = self.path.split('/')[2]
+                    source = {'type': 'git', 'repo': 'https://example.test/app.git', 'ref': 'main', 'path': '/app'}
+                    status, payload = 200, b'{}'
+                    if procedure == 'services.app.updateSourceGit':
+                        expected = {'projectName': 'fixture', 'serviceName': 'web',
+                                    'repo': source['repo'], 'ref': source['ref'], 'path': source['path']}
+                        if json.loads(body)['json'] != expected:
+                            raise AssertionError('Git mutation target or source fields changed')
+                    elif procedure == 'services.app.inspectService':
+                        if case != 'matching':
+                            source[case] = 'different'
+                        payload = json.dumps({'json': {'source': source}}).encode()
+                    else:
+                        raise AssertionError('Unexpected Git acknowledgement procedure')
                 elif self.path.startswith('/dockerfile-ack/'):
                     case = self.path.split('/')[2]
                     status, payload = 200, b'{}'

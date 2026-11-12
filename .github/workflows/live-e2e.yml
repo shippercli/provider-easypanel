@@ -8,7 +8,7 @@ on:
         type: boolean
         default: false
       source:
-        description: Source to deploy through the published installs
+        description: Source to deploy on the disposable target
         type: choice
         options: [image, git]
         default: image
@@ -33,7 +33,9 @@ jobs:
     if: >-
       inputs.published != true &&
       (github.ref == 'refs/heads/main' ||
-       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/audit/2026-10-14-fixes'))
+       (github.event_name == 'workflow_dispatch' &&
+        (github.ref == 'refs/heads/audit/2026-10-14-fixes' ||
+         github.ref == 'refs/heads/codex/easypanel-public-git')))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -47,6 +49,8 @@ jobs:
           coverage: none
       - run: composer install --no-interaction --prefer-dist
       - name: Deploy, verify and clean up disposable app
+        env:
+          SHIPPER_E2E_SOURCE: ${{ inputs.source || 'image' }}
         run: php tests/live-e2e.php
 
   published-lifecycle:
