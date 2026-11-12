@@ -15,12 +15,17 @@ if (! is_string($url) || $url === '' || ! is_string($token) || $token === '') {
 }
 
 $withDatabase = $argv === [$argv[0], '--disposable-database'];
+$recoverDatabase = $argv === [$argv[0], '--recover-disposable-database'];
 $disposable = $withDatabase || $argv === [$argv[0], '--disposable'];
-if (! $disposable && count($argv) !== 1) {
+if (! $disposable && ! $recoverDatabase && count($argv) !== 1) {
     throw new InvalidArgumentException('Unknown live test arguments.');
 }
-$name = $disposable ? 'e'.bin2hex(random_bytes(6)) : 'provider';
-$prefix = $disposable ? 's-' : 'shippercli-demo-';
+$name = match (true) {
+    $recoverDatabase => 'eba8db18205cf',
+    $disposable => 'e'.bin2hex(random_bytes(6)),
+    default => 'provider',
+};
+$prefix = $disposable || $recoverDatabase ? 's-' : 'shippercli-demo-';
 $expectedProject = $prefix.$name.'-v1-'.substr(hash('sha256', json_encode([$name, 'v1'], JSON_THROW_ON_ERROR)), 0, 20);
 $expectedService = 'web';
 $client = new EasyPanelClient($url, $token, timeout: 45);
@@ -87,6 +92,28 @@ $profile = new class {
 $projectExists = static function () use ($client, $expectedProject): bool {
     return in_array($expectedProject, array_column($client->listProjectsAndServices()['projects'], 'name'), true);
 };
+if ($recoverDatabase) {
+    // Only recover the exact disposable fixture reported by run 43225723945.
+    if ($expectedProject !== 's-eba8db18205cf-v1-f2c8c6abb18068eaa758') {
+        throw new RuntimeException('Recovery project identity does not match the failed fixture.');
+    }
+    $inventory = $client->listProjectsAndServices();
+    foreach ($inventory['services'] as $entry) {
+        if ($entry['projectName'] === $expectedProject
+            && ! in_array([$entry['name'], $entry['type']], [['web', 'app'], ['db-fixture', 'mysql']], true)) {
+            throw new RuntimeException('Unexpected service in disposable project. Manual review required.');
+        }
+    }
+    if (! in_array($expectedProject, array_column($inventory['projects'], 'name'), true)) {
+        echo "Disposable MySQL project is already absent.\n";
+        exit(0);
+    }
+    if (! $provider->destroy($project, $profile) || $projectExists()) {
+        throw new RuntimeException('Disposable MySQL recovery failed: '.$provider->getLastError());
+    }
+    echo "Disposable MySQL project recovery verified.\n";
+    exit(0);
+}
 if ($disposable && $projectExists()) {
     throw new RuntimeException('Disposable project name is already in use.');
 }

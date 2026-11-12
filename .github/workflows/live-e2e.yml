@@ -16,7 +16,7 @@ on:
         type: boolean
         default: false
       recover-failed-probe:
-        description: Recover the disposable project from run 43218511043
+        description: Recover the failed disposable project (select include-database for run 43225723945)
         type: boolean
         default: false
       check-public-api:
@@ -105,8 +105,11 @@ jobs:
         if: inputs.probe-create-env && !inputs.recover-failed-probe
         run: php tests/live-create-env.php
       - name: Recover the failed probe
-        if: inputs.recover-failed-probe
+        if: inputs.recover-failed-probe && !inputs.include-database
         run: php tests/live-create-env.php --recover-failed-probe
+      - name: Recover the failed MySQL lifecycle fixture
+        if: inputs.recover-failed-probe && inputs.include-database
+        run: php tests/live-e2e.php --recover-disposable-database
 
   disposable-lifecycle:
     if: github.event_name == 'workflow_dispatch' && inputs.disposable-lifecycle && !inputs.probe-create-env && !inputs.recover-failed-probe && !inputs.check-public-api && github.ref == 'refs/heads/codex/easypanel-create-probe'
