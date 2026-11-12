@@ -20,6 +20,10 @@ on:
         description: Exercise scheduled Box scripts with the public Git fixture
         type: boolean
         default: false
+      mariadb:
+        description: Verify authenticated MariaDB connectivity from a disposable application
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -28,6 +32,7 @@ on:
       - composer.lock
       - src/**
       - tests/live-e2e.php
+      - tests/fixtures/mariadb.Dockerfile
 
 permissions:
   contents: read
@@ -37,23 +42,28 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  reject-worker-and-scheduler:
-    if: github.event_name == 'workflow_dispatch' && inputs.worker && inputs.scheduler
+  reject-incompatible-fixtures:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      ((inputs.worker && inputs.scheduler) ||
+       (inputs.mariadb && (inputs.published || inputs.worker || inputs.scheduler || inputs.source != 'image')))
     runs-on: ubuntu-latest
     steps:
       - run: |
-          echo '::error::Dispatch with either worker or scheduler enabled.'
+          echo '::error::Select one workload fixture. MariaDB requires a source checkout dispatch with the default image selection.'
           exit 1
 
   disposable-lifecycle:
     if: >-
       inputs.published != true && !(inputs.worker && inputs.scheduler) &&
+      (!inputs.mariadb || (!inputs.worker && !inputs.scheduler && inputs.source == 'image')) &&
       (github.ref == 'refs/heads/main' ||
        (github.event_name == 'workflow_dispatch' &&
         (github.ref == 'refs/heads/audit/2026-10-14-fixes' ||
          github.ref == 'refs/heads/codex/easypanel-public-git' ||
          github.ref == 'refs/heads/codex/easypanel-worker-live' ||
-         github.ref == 'refs/heads/codex/easypanel-scheduler-live')))
+         github.ref == 'refs/heads/codex/easypanel-scheduler-live' ||
+         github.ref == 'refs/heads/codex/easypanel-database-live')))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -71,11 +81,12 @@ jobs:
           SHIPPER_E2E_SOURCE: ${{ inputs.scheduler && 'git' || inputs.source || 'image' }}
           SHIPPER_E2E_SCHEDULER: ${{ inputs.scheduler }}
           SHIPPER_E2E_WORKER: ${{ inputs.worker }}
+          SHIPPER_E2E_MARIADB: ${{ inputs.mariadb }}
         run: php tests/live-e2e.php
 
   published-lifecycle:
     if: >-
-      github.event_name == 'workflow_dispatch' && inputs.published && !(inputs.worker && inputs.scheduler) &&
+      github.event_name == 'workflow_dispatch' && inputs.published && !inputs.mariadb && !(inputs.worker && inputs.scheduler) &&
       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/easypanel-scheduler-release')
     runs-on: ubuntu-latest
     timeout-minutes: 12

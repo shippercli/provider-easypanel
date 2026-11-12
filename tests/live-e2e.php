@@ -9,11 +9,16 @@ $shipper = getenv('SHIPPER_E2E_BIN');
 $published = is_string($shipper) && $shipper !== '';
 $worker = getenv('SHIPPER_E2E_WORKER') === 'true';
 $scheduler = getenv('SHIPPER_E2E_SCHEDULER') === 'true';
+$mariadb = getenv('SHIPPER_E2E_MARIADB') === 'true';
 $sourceType = getenv('SHIPPER_E2E_SOURCE') ?: 'image';
 if ($scheduler && ($worker || $sourceType !== 'git')) {
     throw new RuntimeException('The scheduler fixture requires a public Git deployment without a queue worker.');
 }
+if ($mariadb && ($published || $worker || $scheduler || $sourceType !== 'image')) {
+    throw new RuntimeException('The MariaDB fixture requires a standalone source checkout dispatch.');
+}
 $expectedBody = match (true) {
+    $mariadb => 'shippercli-mariadb-query-ok',
     $worker => 'ShipperCLI EasyPanel worker fixture web app',
     $scheduler => 'ShipperCLI EasyPanel scheduler fixture',
     $sourceType === 'git' => 'ShipperCLI EasyPanel public Git fixture',
@@ -56,10 +61,10 @@ $source = $sourceType === 'git' ? [
     'type' => 'image',
     'image' => 'nginx:alpine',
 ];
-if ($worker) {
+if ($worker || $mariadb) {
     $source = [
         'type' => 'dockerfile',
-        'dockerfile' => file_get_contents(__DIR__.'/fixtures/worker.Dockerfile'),
+        'dockerfile' => file_get_contents(__DIR__.'/fixtures/'.($mariadb ? 'mariadb' : 'worker').'.Dockerfile'),
     ];
 }
 $client = new EasyPanelClient($url, $token, timeout: 45);
@@ -71,8 +76,8 @@ $provider = new EasyPanelProvider([
     'source' => $source,
 ], $client);
 
-$project = new class($name, $worker, $scheduler, $schedulerCommand) {
-    public function __construct(private readonly string $name, private readonly bool $worker, private readonly bool $scheduler, private readonly string $schedulerCommand) {}
+$project = new class($name, $worker, $scheduler, $schedulerCommand, $mariadb) {
+    public function __construct(private readonly string $name, private readonly bool $worker, private readonly bool $scheduler, private readonly string $schedulerCommand, private readonly bool $mariadb) {}
 
     public function name(): string
     {
@@ -103,10 +108,20 @@ $project = new class($name, $worker, $scheduler, $schedulerCommand) {
         }] : [];
     }
 
+    public function databases(): array
+    {
+        return $this->mariadb ? [new class {
+            public function name(): string { return 'fixture'; }
+            public function user(): string { return 'fixture'; }
+            public function type(): string { return 'mariadb'; }
+        }] : [];
+    }
+
     public function hasSection(string $section): bool
     {
         return match ($section) {
             'queues' => $this->worker,
+            'databases' => $this->mariadb,
             'cron' => $this->scheduler,
             default => false,
         };
@@ -243,6 +258,9 @@ try {
     }
 
     echo "EasyPanel disposable deployment is ready.\n";
+    if ($mariadb) {
+        echo "EasyPanel disposable MariaDB authenticated query verified.\n";
+    }
     if ($worker) {
         for ($attempt = 1; $attempt <= 12; $attempt++) {
             $logs = $client->queryServiceLogs($expectedProject, 'worker-default', ['limit' => 20]);
