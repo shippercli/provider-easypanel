@@ -13,7 +13,7 @@ on:
         options: [image, git]
         default: image
       worker:
-        description: Exercise a disposable queue worker from the provider checkout
+        description: Exercise a disposable queue worker with the inline Dockerfile fixture
         type: boolean
         default: false
       scheduler:
@@ -67,8 +67,8 @@ jobs:
 
   published-lifecycle:
     if: >-
-      github.event_name == 'workflow_dispatch' && inputs.published && !inputs.worker &&
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/easypanel-patch-smoke')
+      github.event_name == 'workflow_dispatch' && inputs.published &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/easypanel-worker-release')
     runs-on: ubuntu-latest
     timeout-minutes: 12
     strategy:
@@ -80,7 +80,7 @@ jobs:
       - uses: actions/checkout@v5
       - name: Prepare the disposable project configuration
         env:
-          SHIPPER_E2E_SOURCE: ${{ inputs.source }}
+          SHIPPER_E2E_SOURCE: ${{ inputs.worker && 'worker' || inputs.source }}
         run: |
           name="e$(openssl rand -hex 6)"
           echo "SHIPPER_E2E_PROJECT=$name" >> "$GITHUB_ENV"
@@ -95,6 +95,13 @@ jobs:
               source:
           YAML
           case "$SHIPPER_E2E_SOURCE" in
+            worker)
+              cat >> published-fixture/shipper.yml <<'YAML'
+                type: dockerfile
+                dockerfile: |
+          YAML
+              sed 's/^/        /' tests/fixtures/worker.Dockerfile >> published-fixture/shipper.yml
+              ;;
             image)
               cat >> published-fixture/shipper.yml <<'YAML'
                 type: image
@@ -115,6 +122,15 @@ jobs:
           projects:
             $name:
               provider: easypanel
+          YAML
+          if [ "$SHIPPER_E2E_SOURCE" = worker ]; then
+            cat >> published-fixture/shipper.yml <<'YAML'
+              queues:
+                default:
+                  enabled: true
+          YAML
+          fi
+          cat >> published-fixture/shipper.yml <<'YAML'
               profiles:
                 v1:
                   branch: main
@@ -130,7 +146,7 @@ jobs:
         env:
           COMPOSER_HOME: ${{ runner.temp }}/shipper-composer
         run: |
-          composer global require --no-interaction --prefer-dist shippercli/cli:1.0.4 shippercli/provider-easypanel:2.0.1
+          composer global require --no-interaction --prefer-dist shippercli/cli:1.0.4 shippercli/provider-easypanel:2.0.2
           echo "$COMPOSER_HOME/vendor/bin" >> "$GITHUB_PATH"
       - name: Install and validate through the published Shipper Action
         if: matrix.installation == 'action'
@@ -141,12 +157,13 @@ jobs:
         with:
           command: validate
           cli-version: '1.0.4'
-          providers: shippercli/provider-easypanel:2.0.1
+          providers: shippercli/provider-easypanel:2.0.2
           working-directory: published-fixture
       - name: Verify published deployment, HTTPS, and cleanup
         working-directory: published-fixture
         env:
           SHIPPER_E2E_SOURCE: ${{ inputs.source }}
+          SHIPPER_E2E_WORKER: ${{ inputs.worker }}
           EASYPANEL_URL: ${{ secrets.EASYPANEL_URL }}
           EASYPANEL_AUTH_TOKEN: ${{ secrets.EASYPANEL_AUTH_TOKEN }}
         run: |
