@@ -75,11 +75,12 @@ jobs:
           curl --disable --silent --fail --max-time 20 --proto '=https' \
             --header "Authorization: Bearer $EASYPANEL_AUTH_TOKEN" \
             "${EASYPANEL_URL%/}/api/getServiceDomain" \
-            | jq -c 'if type == "object" then {
+            | jq -ce 'if type == "object" then {
                 shape: type,
-                custom_present: (.customServiceDomain | type == "string" and length > 0),
-                generated_present: (.generatedServiceDomain | type == "string" and length > 0),
-                nonempty_string_fields: ([.[] | strings | select(length > 0)] | length)
+                domain_fields: [to_entries[] | select(
+                  (.key | test("^[A-Za-z]{0,32}[Dd]omain[A-Za-z]{0,16}$"))
+                  and (.value | type == "string" and length > 0)
+                ) | .key]
               } else {shape: type} end' 2>/dev/null
 
   probe-create-env:
