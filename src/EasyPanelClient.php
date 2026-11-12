@@ -589,9 +589,17 @@ final class EasyPanelClient
             if ($status === 400 && $path === '/api/trpc/services.app.deployService' && \strlen($response) <= 16384) {
                 $error = \json_decode($response);
                 $message = $error->error->json->message ?? $error->error->message ?? null;
-                if (\is_string($message) && \stripos($message, 'github') !== false
-                    && \preg_match('/\b(token|credentials?|unauthorized|forbidden|authentication)\b/i', $message) === 1) {
-                    $hint = ' EasyPanel reported a GitHub authentication or token error. Check its GitHub settings.';
+                if (\is_string($message)) {
+                    if (\preg_match('/\b(rate limit exceeded|too many requests)\b/i', $message) === 1) {
+                        $hint = ' EasyPanel reported an upstream rate limit.';
+                    } elseif (\stripos($message, 'github') !== false
+                        && \preg_match('/\b(token|credentials?|unauthorized|forbidden|authentication)\b/i', $message) === 1) {
+                        $hint = ' EasyPanel reported a GitHub authentication or token error. Check its GitHub settings.';
+                    } elseif (\preg_match('/\b(repository not found|branch not found|reference not found)\b/i', $message) === 1) {
+                        $hint = ' EasyPanel could not find the source repository or reference.';
+                    } elseif (\preg_match('/\b((invalid|missing) build path|dockerfile not found|failed to read (the )?dockerfile)\b/i', $message) === 1) {
+                        $hint = ' EasyPanel reported a build path or Dockerfile error.';
+                    }
                 }
             }
 

@@ -31,14 +31,21 @@ foreach ([301, 302, 303, 307, 308, 400, 401, 403, 404, 422, 429, 500, 502] as $s
         }
     }
 }
-try {
-    $client->deployAppService('fixture', 'web');
-    throw new LogicException('Expected deployment to fail.');
-} catch (RuntimeException $exception) {
-    if ($exception->getCode() !== 400
-        || !str_contains($exception->getMessage(), 'Check its GitHub settings.')
-        || str_contains($exception->getMessage(), 'synthetic-error-secret')) {
-        throw new RuntimeException('Expected a sanitized GitHub deployment hint.');
+foreach ([
+    'auth' => ' EasyPanel reported a GitHub authentication or token error. Check its GitHub settings.',
+    'rate' => ' EasyPanel reported an upstream rate limit.',
+    'reference' => ' EasyPanel could not find the source repository or reference.',
+    'build' => ' EasyPanel reported a build path or Dockerfile error.',
+    'unknown' => '',
+] as $case => $hint) {
+    try {
+        $client->deployAppService('fixture', $case);
+        throw new LogicException('Expected deployment to fail.');
+    } catch (RuntimeException $exception) {
+        $expected = 'EasyPanel API procedure services.app.deployService failed (HTTP 400).'.$hint;
+        if ($exception->getCode() !== 400 || $exception->getMessage() !== $expected) {
+            throw new RuntimeException('Unexpected deployment hint for '.$case.'.');
+        }
     }
 }
 
