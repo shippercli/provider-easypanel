@@ -303,7 +303,7 @@ final class EasyPanelClient
         int $port = 80,
         string $protocol = 'http',
     ): void {
-        $this->call('domains.createDomain', [
+        $response = $this->call('domains.createDomain', [
             'certificateResolver' => '',
             'destinationType' => 'service',
             'host' => $host,
@@ -320,6 +320,27 @@ final class EasyPanelClient
             ],
             'wildcard' => false,
         ]);
+
+        if (! $response instanceof \stdClass || (array) $response !== []) {
+            return;
+        }
+
+        foreach ($this->listDomains($projectName, $serviceName) as $domain) {
+            $destination = $domain['serviceDestination'] ?? null;
+            if (\strcasecmp($domain['host'], $host) === 0
+                && ($domain['https'] ?? null) === true
+                && ($domain['destinationType'] ?? null) === 'service'
+                && ($destination['projectName'] ?? null) === $projectName
+                && ($destination['serviceName'] ?? null) === $serviceName
+                && ($domain['path'] ?? null) === '/'
+                && ($destination['path'] ?? null) === '/'
+                && ($destination['protocol'] ?? null) === $protocol
+                && ($destination['port'] ?? null) === $port) {
+                return;
+            }
+        }
+
+        throw new \RuntimeException('EasyPanel did not persist the requested HTTPS binding.');
     }
 
     public function deployAppService(string $projectName, string $serviceName): void
@@ -447,6 +468,7 @@ final class EasyPanelClient
         }
         // These void mutations can return an empty object on the legacy API.
         if ((array) $shape === [] && in_array($procedure, [
+            'domains.createDomain',
             'projects.destroyProject',
             'services.app.deployService',
             'services.app.updateSourceImage',

@@ -55,6 +55,15 @@ class ResponsesTest(unittest.TestCase):
                         services = [] if state == 'absent' else [{'projectName': 'fixture', 'name': names[kind], 'type': 'redis' if state == 'replaced' else types[kind]}]
                         data = {'projects': [{'name': 'fixture'}], 'services': services}
                     status, payload = 200, json.dumps({'json': data}).encode()
+                elif self.path.startswith('/domain-ack/'):
+                    case = self.path.split('/')[2]
+                    status, payload = 200, b'{}'
+                    if procedure == 'domains.listDomains':
+                        binding = {'host': 'fixture.test', 'https': True, 'destinationType': 'service', 'path': '/',
+                                   'serviceDestination': {'projectName': 'fixture', 'serviceName': 'web', 'path': '/',
+                                                          'protocol': 'https' if case == 'wrong-protocol' else 'http',
+                                                          'port': 8080 if case == 'wrong-port' else 80}}
+                        payload = json.dumps({'json': [] if case == 'missing' else [binding]}).encode()
                 elif self.path.startswith('/image-ack/'):
                     case = self.path.split('/')[2]
                     status, payload = 200, b'{}'
@@ -190,7 +199,7 @@ class ResponsesTest(unittest.TestCase):
                     self.assertTrue(path.endswith('/api/createAppService'))
                     self.assertEqual(auth, 'Bearer synthetic-authorization-secret')
                     self.assertEqual(json.loads(body), {'projectName': 'fixture', 'serviceName': 'web', 'env': 'SHIPPERCLI_MANAGED=1'})
-                self.assertEqual(len(received), 260)
+                self.assertEqual(len(received), 268)
                 self.assertTrue(all(auth == 'synthetic-authorization-secret' for path, auth, _ in received if not path.startswith('/owned-app/')))
                 self.assertEqual(sum(b'synthetic-body-secret' in body for _, _, body in received), 26)
                 for case in ['absent', 'retain-project', 'other-service', 'pending-app', 'pending-project', 'unreadable']:
