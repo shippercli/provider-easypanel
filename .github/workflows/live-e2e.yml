@@ -23,7 +23,7 @@ on:
       database:
         description: Verify authenticated connectivity from a disposable application
         type: choice
-        options: [none, mariadb, postgres, mongo, redis]
+        options: [none, mysql, mariadb, postgres, mongo, redis]
         default: none
       retry:
         description: Resume a disposable app left at the app creation step
@@ -37,7 +37,7 @@ on:
       - composer.lock
       - src/**
       - tests/live-e2e.php
-      - tests/fixtures/mariadb.Dockerfile
+      - tests/fixtures/mysql-family.Dockerfile
       - tests/fixtures/datastore.Dockerfile
 
 permissions:
@@ -137,7 +137,7 @@ jobs:
           case "$SHIPPER_E2E_SOURCE" in
             database)
               case "$SHIPPER_E2E_DATABASE" in
-                mariadb) fixture=mariadb ;;
+                mysql|mariadb) fixture=mysql-family ;;
                 postgres|mongo|redis) fixture=datastore ;;
                 *) exit 1 ;;
               esac
