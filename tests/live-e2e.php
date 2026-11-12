@@ -22,6 +22,35 @@ $name = $disposable ? 'e'.bin2hex(random_bytes(6)) : 'provider';
 $prefix = $disposable ? 's-' : 'shippercli-demo-';
 $expectedProject = $prefix.$name.'-v1-'.substr(hash('sha256', json_encode([$name, 'v1'], JSON_THROW_ON_ERROR)), 0, 20);
 $expectedService = 'web';
+$requestedDomain = null;
+if ($disposable) {
+    $handle = curl_init(rtrim($url, '/').'/api/getServiceDomain');
+    if ($handle === false) {
+        throw new RuntimeException('Unable to initialize the service domain settings request.');
+    }
+    curl_setopt_array($handle, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 20,
+        CURLOPT_PROTOCOLS_STR => 'HTTPS',
+        CURLOPT_HTTPHEADER => ['Authorization: Bearer '.$token],
+    ]);
+    $response = curl_exec($handle);
+    $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+    unset($handle);
+    if ($status !== 200 || ! is_string($response)) {
+        throw new RuntimeException('Unable to read the EasyPanel service domain settings.');
+    }
+
+    $settings = json_decode($response, true);
+    $baseDomain = $settings['defaultServiceDomain'] ?? null;
+    if (! is_string($baseDomain) || ! str_contains($baseDomain, '.')) {
+        throw new RuntimeException('EasyPanel did not provide a default service base domain.');
+    }
+    $requestedDomain = $expectedService.'-'.$expectedProject.'.'.$baseDomain;
+    if (! filter_var($requestedDomain, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
+        throw new RuntimeException('The disposable HTTPS hostname is invalid.');
+    }
+}
 $client = new EasyPanelClient($url, $token, timeout: 45);
 $provider = new EasyPanelProvider([
     'url' => $url,
@@ -49,7 +78,9 @@ $project = new class($name) {
     }
 };
 
-$profile = new class {
+$profile = new class($requestedDomain) {
+    public function __construct(private readonly ?string $domain) {}
+
     public function name(): string
     {
         return 'v1';
@@ -62,7 +93,7 @@ $profile = new class {
 
     public function get(string $key): mixed
     {
-        return null;
+        return $key === 'domain' ? $this->domain : null;
     }
 };
 
@@ -132,6 +163,7 @@ try {
             && ($domain['serviceDestination']['projectName'] ?? null) === $expectedProject
             && ($domain['serviceDestination']['serviceName'] ?? null) === $expectedService
             && is_string($domain['host'] ?? null)
+            && ($requestedDomain === null || strcasecmp($domain['host'], $requestedDomain) === 0)
         ) {
             $domainHost = $domain['host'];
             break;
@@ -139,7 +171,7 @@ try {
     }
 
     if ($domainHost === null) {
-        throw new RuntimeException('The Shipper demo service has no generated HTTPS domain.');
+        throw new RuntimeException('The Shipper test service has no matching HTTPS binding.');
     }
 
     $waitForNginx = static function () use ($domainHost): void {
