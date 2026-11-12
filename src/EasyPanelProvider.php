@@ -191,9 +191,9 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             }
             $prefix = $prefixes[$database->name()];
             $databaseName = $this->databaseIdentifier($database->name());
-            $username = method_exists($database, 'user') ? $this->databaseIdentifier($database->user()) : 'shipper';
+            $username = $this->databaseUsername($database, $type);
             if (($available[$prefix.'_DATABASE'] ?? null) !== $databaseName
-                || ($available[$prefix.'_USERNAME'] ?? null) !== $username
+                || ! $this->databaseUsernameMatches($available[$prefix.'_USERNAME'] ?? null, $username, $type)
                 || ! is_string($available[$prefix.'_HOST'] ?? null) || $available[$prefix.'_HOST'] === ''
                 || ! is_string($available[$prefix.'_PASSWORD'] ?? null) || $available[$prefix.'_PASSWORD'] === '') {
                 return "Existing EasyPanel database {$serviceName} requires matching {$prefix} connection settings and a password in the application environment.";
@@ -549,7 +549,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             $type = $this->databaseType($database);
             $serviceName = $this->databaseServiceName($database->name());
             $databaseName = $this->databaseIdentifier($database->name());
-            $username = method_exists($database, 'user') ? $this->databaseIdentifier($database->user()) : 'shipper';
+            $username = $this->databaseUsername($database, $type);
             $inventory = $client->listProjectsAndServices();
             $service = $this->findService($inventory, $projectName, $serviceName);
             if ($service !== null) {
@@ -565,10 +565,18 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                 }
                 $prefix = $prefixes[$database->name()];
                 if (($available[$prefix.'_DATABASE'] ?? null) !== $databaseName
-                    || ($available[$prefix.'_USERNAME'] ?? null) !== $username
+                    || ! $this->databaseUsernameMatches($available[$prefix.'_USERNAME'] ?? null, $username, $type)
                     || ! \is_string($available[$prefix.'_HOST'] ?? null) || $available[$prefix.'_HOST'] === ''
                     || ! \is_string($available[$prefix.'_PASSWORD'] ?? null) || $available[$prefix.'_PASSWORD'] === '') {
                     throw new \RuntimeException("Existing EasyPanel database {$serviceName} requires matching {$prefix} connection settings and a password in the application environment.");
+                }
+                if ($type === 'redis' && $available[$prefix.'_USERNAME'] !== $username) {
+                    $environment = [...$environment,
+                        $prefix.'_HOST' => $available[$prefix.'_HOST'],
+                        $prefix.'_DATABASE' => $databaseName,
+                        $prefix.'_USERNAME' => $username,
+                        $prefix.'_PASSWORD' => $available[$prefix.'_PASSWORD'],
+                    ];
                 }
                 continue;
             }
@@ -951,6 +959,21 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         }
 
         return $prefixes;
+    }
+
+    private function databaseUsername(object $database, string $type): string
+    {
+        if ($type === 'redis') {
+            return 'default';
+        }
+
+        return method_exists($database, 'user') ? $this->databaseIdentifier($database->user()) : 'shipper';
+    }
+
+    private function databaseUsernameMatches(mixed $existing, string $username, string $type): bool
+    {
+        // Older releases exported the declaration's username for Redis.
+        return $existing === $username || ($type === 'redis' && is_string($existing) && $existing !== '');
     }
 
     private function databaseType(object $database): string

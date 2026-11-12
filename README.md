@@ -52,7 +52,11 @@ delivery. Profile environment values override project/provider values; existing
 application values can also supply the password when recreating a missing
 service. Empty application passwords and malformed application environment content fail
 before database provisioning. Database names/users and host values remain
-controlled by declarations/provider settings.
+controlled by declarations/provider settings. EasyPanel Redis uses the fixed
+ACL user `default`. Shipper exports that username for Redis and corrects the
+username on re-apply for a Shipper-owned Redis service with existing connection
+settings. For MongoDB, authenticate against `admin` and use `DB_DATABASE` to select
+the application database.
 Re-apply preserves the existing application environment and does not rotate
 passwords for existing database services. An existing service's credentials
 must already be configured in the application or supplied through its configured
