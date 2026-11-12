@@ -3,6 +3,10 @@ name: EasyPanel Live E2E
 on:
   workflow_dispatch:
     inputs:
+      disposable-lifecycle:
+        description: Deploy and destroy an isolated EasyPanel app
+        type: boolean
+        default: false
       probe-create-env:
         description: Check ownership marker persistence on a disposable app
         type: boolean
@@ -31,7 +35,7 @@ concurrency:
 
 jobs:
   deploy-demo:
-    if: github.ref == 'refs/heads/main' && !inputs.probe-create-env && !inputs.recover-failed-probe && !inputs.check-public-api
+    if: github.ref == 'refs/heads/main' && !inputs.disposable-lifecycle && !inputs.probe-create-env && !inputs.recover-failed-probe && !inputs.check-public-api
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -48,7 +52,7 @@ jobs:
         run: php tests/live-e2e.php
 
   check-public-api:
-    if: github.event_name == 'workflow_dispatch' && inputs.check-public-api && github.ref == 'refs/heads/codex/easypanel-create-probe'
+    if: github.event_name == 'workflow_dispatch' && inputs.check-public-api && !inputs.disposable-lifecycle && github.ref == 'refs/heads/codex/easypanel-create-probe'
     runs-on: ubuntu-latest
     timeout-minutes: 2
     env:
@@ -67,7 +71,7 @@ jobs:
           [[ "$response" == "200 application/json"* ]]
 
   probe-create-env:
-    if: github.event_name == 'workflow_dispatch' && !inputs.check-public-api && (inputs.probe-create-env || inputs.recover-failed-probe) && github.ref == 'refs/heads/codex/easypanel-create-probe'
+    if: github.event_name == 'workflow_dispatch' && !inputs.check-public-api && !inputs.disposable-lifecycle && (inputs.probe-create-env || inputs.recover-failed-probe) && github.ref == 'refs/heads/codex/easypanel-create-probe'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -86,3 +90,19 @@ jobs:
       - name: Recover the failed probe
         if: inputs.recover-failed-probe
         run: php tests/live-create-env.php --recover-failed-probe
+
+  disposable-lifecycle:
+    if: github.event_name == 'workflow_dispatch' && inputs.disposable-lifecycle && !inputs.probe-create-env && !inputs.recover-failed-probe && !inputs.check-public-api && github.ref == 'refs/heads/codex/easypanel-create-probe'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EASYPANEL_URL: ${{ secrets.EASYPANEL_URL }}
+      EASYPANEL_AUTH_TOKEN: ${{ secrets.EASYPANEL_AUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - run: composer install --no-interaction --prefer-dist
+      - run: php tests/live-e2e.php --disposable
