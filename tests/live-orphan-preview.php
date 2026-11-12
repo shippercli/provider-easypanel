@@ -8,7 +8,8 @@ use Symfony\Component\Yaml\Yaml;
 $shipper = $argv[1] ?? '';
 $url = getenv('EASYPANEL_URL');
 $token = getenv('EASYPANEL_AUTH_TOKEN');
-if (! is_executable($shipper) || ! $url || ! $token || ! getenv('GITHUB_TOKEN') || ! getenv('GITHUB_REPOSITORY')) {
+$repository = getenv('GITHUB_REPOSITORY');
+if (! is_executable($shipper) || ! $url || ! $token || ! getenv('GITHUB_TOKEN') || ! $repository) {
     throw new RuntimeException('The published CLI, panel credentials and repository-scoped GitHub token are required.');
 }
 
@@ -61,7 +62,7 @@ $config = tempnam(sys_get_temp_dir(), 'shipper-preview-');
 if ($config === false) {
     throw new RuntimeException('Could not allocate preview configuration file.');
 }
-$writeConfig = static function (string $project, string $domain) use ($config): void {
+$writeConfig = static function (string $project, string $domain) use ($config, $repository): void {
     $yaml = Yaml::dump([
         'providers' => ['easypanel' => [
             'url' => '${EASYPANEL_URL}',
@@ -70,9 +71,11 @@ $writeConfig = static function (string $project, string $domain) use ($config): 
             'service_name' => 'web',
             'source' => ['type' => 'image', 'image' => 'nginx:alpine'],
         ]],
-        'projects' => [$project => ['provider' => 'easypanel', 'profiles' => [
-            'preview' => ['domain' => $domain, 'branch' => 'main'],
-        ]]],
+        'projects' => [$project => [
+            'provider' => 'easypanel',
+            'repository' => ['provider' => 'github', 'name' => $repository],
+            'profiles' => ['preview' => ['domain' => $domain, 'branch' => 'main']],
+        ]],
     ], 8);
     if (file_put_contents($config, $yaml) === false) {
         throw new RuntimeException('Could not write preview configuration.');
