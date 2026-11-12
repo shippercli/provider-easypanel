@@ -13,32 +13,24 @@ if (! in_array($project, array_column($inventory['projects'], 'name'), true)) {
     echo "The previous fixture is absent.\n";
     exit(0);
 }
-foreach ($inventory['services'] as $service) {
-    if (($service['projectName'] ?? null) !== $project) {
-        continue;
-    }
-    $name = match ($service['name'] ?? null) {
-        'web' => 'web',
-        'scheduler' => 'scheduler',
-        default => 'other',
-    };
-    $type = match ($service['type'] ?? null) {
-        'app' => 'app',
-        'box' => 'box',
-        default => 'other',
-    };
-    echo "Fixture service: {$name}/{$type}\n";
-    if ($name !== 'scheduler' || $type !== 'box') {
-        continue;
-    }
-    try {
-        $box = $client->inspectBoxService($project, 'scheduler');
-        $environment = $box['env'] ?? null;
-        echo 'Box env shape: '.get_debug_type($environment).PHP_EOL;
-        $content = is_array($environment) ? ($environment['content'] ?? null) : $environment;
-        $marker = 'SHIPPERCLI_MANAGED_PROJECT='.$project;
-        echo 'Box project marker: '.(is_string($content) && in_array($marker, preg_split('/\R/', $content), true) ? 'present' : 'absent').PHP_EOL;
-    } catch (RuntimeException $exception) {
-        echo 'Box inspection failed. HTTP status code if available: '.$exception->getCode().PHP_EOL;
-    }
+$services = array_values(array_filter($inventory['services'], static fn (array $service): bool =>
+    ($service['projectName'] ?? null) === $project));
+if (count($services) !== 1 || ($services[0]['name'] ?? null) !== 'web' || ($services[0]['type'] ?? null) !== 'app') {
+    throw new RuntimeException('The failed fixture no longer matches the verified web-only inventory.');
 }
+$app = $client->inspectAppService($project, 'web');
+$environment = is_string($app['env'] ?? null) ? preg_split('/\R/', $app['env']) : [];
+if (! in_array('SHIPPERCLI_MANAGED=1', $environment, true)
+    || ! in_array('SHIPPERCLI_MANAGED_PROJECT='.$project, $environment, true)) {
+    throw new RuntimeException('Could not confirm ownership of the failed fixture.');
+}
+try {
+    $client->destroyProject($project);
+} catch (RuntimeException $exception) {
+    $deletionError = $exception;
+}
+$remaining = $client->listProjectsAndServices();
+if (in_array($project, array_column($remaining['projects'], 'name'), true)) {
+    throw $deletionError ?? new RuntimeException('The failed fixture still exists.');
+}
+echo "Verified removal of the previous web-only fixture.\n";

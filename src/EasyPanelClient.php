@@ -596,6 +596,8 @@ final class EasyPanelClient
             'services.app.updateSourceDockerfile',
             'services.app.updateEnv',
             'services.app.destroyService',
+            'services.box.updateEnv',
+            'services.box.destroyService',
         ], true)) {
             return $shape;
         }
