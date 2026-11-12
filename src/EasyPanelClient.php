@@ -408,6 +408,9 @@ final class EasyPanelClient
         }
 
         if ($status < 200 || $status >= 300) {
+            if (\preg_match('~\A/api/(?:trpc/)?[a-zA-Z.]+\z~', $path) === 1) {
+                fwrite(STDERR, "EasyPanel operation rejected: {$path}\n");
+            }
             throw new \RuntimeException('EasyPanel API request failed (HTTP '.$status.').');
         }
 
