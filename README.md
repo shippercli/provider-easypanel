@@ -99,7 +99,7 @@ projects:
           APP_ENV: production
 ```
 
-The resulting EasyPanel project is named `shipper-backend-production`. If no profile domain is supplied, EasyPanel's generated HTTPS domain remains available.
+The resulting EasyPanel project is named `shipper-backend-production`. If no profile domain is supplied, Shipper keeps any existing app domains. For an app with no domains, Shipper creates an HTTPS binding using the panel's configured service base domain, when available. Set `automatic_domain: false` in the EasyPanel provider configuration to skip automatic domain creation for internal apps. An explicit profile domain still applies.
 
 ## Source types
 

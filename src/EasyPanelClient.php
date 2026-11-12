@@ -296,6 +296,42 @@ final class EasyPanelClient
         return $data;
     }
 
+    public function serviceBaseDomain(): ?string
+    {
+        try {
+            $settings = $this->transport !== null
+                ? ($this->transport)('getServiceDomain', [])
+                : \json_decode($this->request('/api/getServiceDomain', 'Bearer '.$this->authToken), true, flags: \JSON_THROW_ON_ERROR);
+        } catch (\RuntimeException $exception) {
+            if (\in_array($exception->getCode(), [403, 404], true)) {
+                return null;
+            }
+            throw $exception;
+        }
+
+        if ($settings === null) {
+            return null;
+        }
+        if (! \is_array($settings)) {
+            throw new \RuntimeException('EasyPanel returned invalid service domain settings.');
+        }
+
+        foreach (['customServiceDomain', 'defaultServiceDomain'] as $key) {
+            $domain = $settings[$key] ?? '';
+            if ($domain === '') {
+                continue;
+            }
+            if (! \is_string($domain) || ! \filter_var($domain, \FILTER_VALIDATE_DOMAIN, \FILTER_FLAG_HOSTNAME)
+                || ! \str_contains($domain, '.') || \str_ends_with($domain, '.') || \filter_var($domain, \FILTER_VALIDATE_IP)) {
+                throw new \RuntimeException('EasyPanel returned an invalid service base domain.');
+            }
+
+            return \strtolower($domain);
+        }
+
+        return null;
+    }
+
     public function createDomain(
         string $projectName,
         string $serviceName,
@@ -464,7 +500,7 @@ final class EasyPanelClient
         }
 
         if ($status < 200 || $status >= 300) {
-            throw new \RuntimeException('EasyPanel API request failed (HTTP '.$status.').');
+            throw new \RuntimeException('EasyPanel API request failed (HTTP '.$status.').', $status);
         }
 
         return $response;
