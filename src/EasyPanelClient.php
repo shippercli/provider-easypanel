@@ -585,7 +585,17 @@ final class EasyPanelClient
                 $operation = 'procedure '.$matches[1];
             }
 
-            throw new \RuntimeException('EasyPanel API '.$operation.' failed (HTTP '.$status.').', $status);
+            $hint = '';
+            if ($status === 400 && $path === '/api/trpc/services.app.deployService' && \strlen($response) <= 16384) {
+                $error = \json_decode($response);
+                $message = $error->error->json->message ?? $error->error->message ?? null;
+                if (\is_string($message) && \stripos($message, 'github') !== false
+                    && \preg_match('/\b(token|credentials?|unauthorized|forbidden|authentication)\b/i', $message) === 1) {
+                    $hint = ' EasyPanel reported a GitHub authentication or token error. Check its GitHub settings.';
+                }
+            }
+
+            throw new \RuntimeException('EasyPanel API '.$operation.' failed (HTTP '.$status.').'.$hint, $status);
         }
 
         return $response;
