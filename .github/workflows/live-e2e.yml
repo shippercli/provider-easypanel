@@ -11,6 +11,10 @@ on:
         description: Recover the disposable project from run 43213872024
         type: boolean
         default: false
+      check-public-api:
+        description: Check the documented read-only project inventory route
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -27,7 +31,7 @@ concurrency:
 
 jobs:
   deploy-demo:
-    if: github.ref == 'refs/heads/main' && !inputs.probe-create-env && !inputs.recover-failed-probe
+    if: github.ref == 'refs/heads/main' && !inputs.probe-create-env && !inputs.recover-failed-probe && !inputs.check-public-api
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -43,8 +47,27 @@ jobs:
       - name: Apply and verify dedicated demo
         run: php tests/live-e2e.php
 
+  check-public-api:
+    if: github.event_name == 'workflow_dispatch' && inputs.check-public-api && github.ref == 'refs/heads/codex/easypanel-create-probe'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      EASYPANEL_URL: ${{ secrets.EASYPANEL_URL }}
+      EASYPANEL_AUTH_TOKEN: ${{ secrets.EASYPANEL_AUTH_TOKEN }}
+    steps:
+      - name: Check the public inventory route
+        run: |
+          test -n "$EASYPANEL_URL"
+          test -n "$EASYPANEL_AUTH_TOKEN"
+          response=$(curl --disable --silent --max-time 20 --proto '=https' \
+            --output /dev/null --write-out '%{http_code} %{content_type}' \
+            --header "Authorization: Bearer $EASYPANEL_AUTH_TOKEN" \
+            "${EASYPANEL_URL%/}/api/listProjects")
+          echo "Public inventory HTTP status: ${response%% *}"
+          [[ "$response" == "200 application/json"* ]]
+
   probe-create-env:
-    if: github.event_name == 'workflow_dispatch' && (inputs.probe-create-env || inputs.recover-failed-probe) && github.ref == 'refs/heads/codex/easypanel-create-probe'
+    if: github.event_name == 'workflow_dispatch' && !inputs.check-public-api && (inputs.probe-create-env || inputs.recover-failed-probe) && github.ref == 'refs/heads/codex/easypanel-create-probe'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
