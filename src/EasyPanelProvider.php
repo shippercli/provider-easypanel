@@ -336,28 +336,7 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             $this->applyCron($client, $project, $profile, $projectName, $source, $databaseEnvironment);
 
             $domain = $this->normalizeDomain($this->profileValue($profile, 'domain'));
-            $domains = [];
-            if ($domain !== null || $this->booleanConfig('automatic_domain', true)) {
-                $domains = $client->listDomains($projectName, $serviceName);
-                if ($domain === null && $domains === []) {
-                    $base = $client->serviceBaseDomain();
-                    if ($base !== null) {
-                        $domain = $serviceName.'-'.$projectName.'.'.$base;
-                        if (! \filter_var($domain, \FILTER_VALIDATE_DOMAIN, \FILTER_FLAG_HOSTNAME)) {
-                            throw new \RuntimeException('The derived EasyPanel domain is invalid. Configure a profile domain.');
-                        }
-                    }
-                }
-            }
-            if ($domain !== null && ! $this->domainExists($domains, $domain)) {
-                $client->createDomain(
-                    $projectName,
-                    $serviceName,
-                    $domain,
-                    $this->integerConfig('port', 80),
-                    $this->stringConfig('protocol', 'http'),
-                );
-            }
+            $this->reconcileAppDomain($client, $projectName, $serviceName, $domain);
 
             $client->deployAppService($projectName, $serviceName);
 
@@ -1305,16 +1284,57 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
         return false;
     }
 
-    /** @param array<int, array<string, mixed>> $domains */
-    private function domainExists(array $domains, string $host): bool
+    private function reconcileAppDomain(EasyPanelClient $client, string $projectName, string $serviceName, ?string $host): void
     {
-        foreach ($domains as $domain) {
-            if (($domain['host'] ?? null) === $host) {
-                return true;
+        if ($host === null && ! $this->booleanConfig('automatic_domain', true)) {
+            return;
+        }
+
+        $domains = $client->listDomains($projectName, $serviceName);
+        $automatic = $host === null;
+        if ($automatic) {
+            $prefix = \strtolower($serviceName.'-'.$projectName.'.');
+            if ($domains !== [] && ! \array_filter(
+                $domains,
+                static fn (array $domain): bool => \str_starts_with(\strtolower($domain['host']), $prefix),
+            )) {
+                return;
+            }
+            $base = $client->serviceBaseDomain();
+            if ($base === null) {
+                return;
+            }
+            $host = $prefix.$base;
+            if (! \filter_var($host, \FILTER_VALIDATE_DOMAIN, \FILTER_FLAG_HOSTNAME)) {
+                throw new \RuntimeException('The derived EasyPanel domain is invalid. Configure a profile domain.');
             }
         }
 
-        return false;
+        $port = $this->integerConfig('port', 80);
+        $protocol = $this->stringConfig('protocol', 'http');
+        $matchingBinding = false;
+        $generatedHostPresent = false;
+        foreach ($domains as $domain) {
+            if (\strcasecmp($domain['host'], $host) !== 0) {
+                continue;
+            }
+            $generatedHostPresent = $automatic;
+            if (\is_string($domain['path'] ?? null) && $domain['path'] !== '/') {
+                continue;
+            }
+            if (! $client->matchesHttpsBinding($domain, $projectName, $serviceName, $port, $protocol)) {
+                throw new \RuntimeException('An existing EasyPanel root domain does not match the requested HTTPS binding. Review the route in EasyPanel before retrying.');
+            }
+            $matchingBinding = true;
+        }
+
+        if ($generatedHostPresent && ! $matchingBinding) {
+            throw new \RuntimeException('The generated EasyPanel hostname has no matching HTTPS root binding. Review the route in EasyPanel before retrying.');
+        }
+        if ($matchingBinding || ($automatic && $domains !== [])) {
+            return;
+        }
+        $client->createDomain($projectName, $serviceName, $host, $port, $protocol);
     }
 
     private function managedProjectName(object $project, object $profile): string

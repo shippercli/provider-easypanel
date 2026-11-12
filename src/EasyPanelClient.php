@@ -362,21 +362,28 @@ final class EasyPanelClient
         }
 
         foreach ($this->listDomains($projectName, $serviceName) as $domain) {
-            $destination = $domain['serviceDestination'] ?? null;
             if (\strcasecmp($domain['host'], $host) === 0
-                && ($domain['https'] ?? null) === true
-                && ($domain['destinationType'] ?? null) === 'service'
-                && ($destination['projectName'] ?? null) === $projectName
-                && ($destination['serviceName'] ?? null) === $serviceName
-                && ($domain['path'] ?? null) === '/'
-                && ($destination['path'] ?? null) === '/'
-                && ($destination['protocol'] ?? null) === $protocol
-                && ($destination['port'] ?? null) === $port) {
+                && $this->matchesHttpsBinding($domain, $projectName, $serviceName, $port, $protocol)) {
                 return;
             }
         }
 
         throw new \RuntimeException('EasyPanel did not persist the requested HTTPS binding.');
+    }
+
+    /** @param array<string, mixed> $domain */
+    public function matchesHttpsBinding(array $domain, string $projectName, string $serviceName, int $port, string $protocol): bool
+    {
+        $destination = $domain['serviceDestination'] ?? null;
+
+        return ($domain['https'] ?? null) === true
+            && ($domain['destinationType'] ?? null) === 'service'
+            && ($destination['projectName'] ?? null) === $projectName
+            && ($destination['serviceName'] ?? null) === $serviceName
+            && ($domain['path'] ?? null) === '/'
+            && ($destination['path'] ?? null) === '/'
+            && ($destination['protocol'] ?? null) === $protocol
+            && ($destination['port'] ?? null) === $port;
     }
 
     public function deployAppService(string $projectName, string $serviceName): void

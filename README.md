@@ -261,6 +261,10 @@ normalization. These are shape checks: ownership markers, expected identities,
 requested configuration, runtime state and live compatibility require separate
 verification.
 
+Before reusing a requested HTTPS root binding, Shipper verifies the destination,
+backend path, port and protocol. A conflicting binding stops deployment with a
+diagnostic so the operator can review the existing route in EasyPanel.
+
 Inspection responses also reject contradictory optional `projectName`,
 `serviceName`, `name` or `type` fields. When present, each must exactly match the
 requested project, service and canonical service type. Diagnostics do not echo
