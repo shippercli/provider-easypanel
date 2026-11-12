@@ -22,8 +22,8 @@ if ($retry && ($published || $worker || $scheduler || $withDatabase || $sourceTy
 if ($scheduler && ($worker || $sourceType !== 'git')) {
     throw new RuntimeException('The scheduler fixture requires a public Git deployment without a queue worker.');
 }
-if ($withDatabase && ($worker || $scheduler || $sourceType !== 'image' || ($published && $database !== 'redis'))) {
-    throw new RuntimeException('The database fixture requires an image dispatch. Published database verification supports Redis.');
+if ($withDatabase && ($worker || $scheduler || $sourceType !== 'image')) {
+    throw new RuntimeException('The database fixture requires an image dispatch.');
 }
 $expectedBody = match (true) {
     $withDatabase => 'shippercli-'.$database.'-query-ok',
