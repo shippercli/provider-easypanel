@@ -2,7 +2,7 @@
 
 Deploy and operate applications on an EasyPanel instance through its API.
 
-## Version 1 scope
+## Version 2 scope
 
 Supported:
 
@@ -70,8 +70,22 @@ legacy databases are blocked from reuse and preserved during cleanup.
 ## Install
 
 ```bash
-composer require shippercli/provider-easypanel
+composer require 'shippercli/provider-easypanel:^2.0'
 ```
+
+Use Shipper CLI 1.0.4 or later for CLI enforcement of blocked plans.
+
+### Upgrading from version 1
+
+Version 2 uses a new scoped project identity. Keep the version 1 provider
+pinned for existing deployments until you are ready to cut over. Version 2
+does not manage the legacy deployment in place. Create a separate version 2
+deployment with a staging hostname and a project/profile pair whose normalized
+version 1 name differs from the legacy project. For example, use a new project
+name ending in `-v2` and check that the resulting name is unused. Back
+up and transfer any application data and secrets with your normal EasyPanel
+procedures, verify the new deployment, then switch production traffic. Keep
+the old deployment available until you have verified the cutover.
 
 ## Configure
 
@@ -99,7 +113,7 @@ projects:
           APP_ENV: production
 ```
 
-The resulting EasyPanel project is named `shipper-backend-production`. If no profile domain is supplied, Shipper keeps any existing app domains. For an app with no domains, Shipper creates an HTTPS binding using the panel's configured service base domain, when available. Set `automatic_domain: false` in the EasyPanel provider configuration to skip automatic domain creation for internal apps. An explicit profile domain still applies.
+The resulting EasyPanel project is named `shipper-backend-production-f06044f28547c24eaf3b`. If no profile domain is supplied, Shipper keeps any existing app domains. For an app with no domains, Shipper creates an HTTPS binding using the panel's configured service base domain, when available. Set `automatic_domain: false` in the EasyPanel provider configuration to skip automatic domain creation for internal apps. An explicit profile domain still applies.
 
 ## Source types
 
@@ -160,6 +174,10 @@ marker for the configured project and service. It preserves unmarked and legacy
 databases. The current EasyPanel API client has no database environment update
 operation, so existing databases cannot be adopted safely.
 
+Destroy can remove a marked database that is absent from the current project
+declarations, even when `reconcile_databases` is disabled. Keep any databases
+you intend to preserve declared in the project passed to destroy.
+
 After deleting the marked service, the provider deletes its project only when `destroy_project` is enabled and no services remain. Set `destroy_project: false` to retain empty managed projects. The core orphan-preview flow enumerates marked app services through their configured domains and routes deletion through the same ownership checks.
 
 ## Project ownership scope
@@ -170,13 +188,10 @@ with `JSON_THROW_ON_ERROR`). This distinguishes names that normalize to the same
 slug or have ambiguous hyphen boundaries. Ownership markers use the complete
 scoped project name.
 
-Legacy names without this suffix require manual review and migration. Apply
+Legacy names without this suffix require a separate cutover. Apply
 refuses to create a replacement while the legacy project exists. Destroy refuses
 a legacy target when no scoped project exists; preview listing excludes legacy
-targets. Verify the exact project/profile, services, secrets, and database
-associations before renaming the project and updating ownership markers on all
-app, database, worker, and scheduler services. Shipper does not automatically
-adopt or migrate legacy projects.
+targets. Follow the version 1 upgrade procedure above to migrate traffic.
 
 ## Development
 
@@ -190,8 +205,8 @@ composer test
 Plan validates configuration and reads EasyPanel project/service inventory. It
 requires API access and performs no writes. Legacy project names, occupied app
 names of another service type, missing or malformed ownership markers, and API
-read failures return `blocked: true` with one actionable blocked entry. The core
-CLI enforcement is proposed in shippercli/cli#154. Database and workload
+read failures return `blocked: true` with one actionable blocked entry. Shipper
+CLI 1.0.4 enforces blocked plans before applying changes. Database and workload
 prerequisites remain subject to validation during apply; an unblocked app plan
 does not prove every deployment prerequisite or live connection is ready.
 
