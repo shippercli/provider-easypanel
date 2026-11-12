@@ -83,15 +83,8 @@ try {
 }
 
 try {
-    $request('createAppService', [
-        'projectName' => $project,
-        'serviceName' => $service,
-        'env' => $marker,
-    ]);
-    $details = json_decode($request('inspectAppService?'.http_build_query([
-        'projectName' => $project,
-        'serviceName' => $service,
-    ])), true);
+    $client->createAppService($project, $service, $marker);
+    $details = $client->inspectAppService($project, $service);
     if (! is_string($details['env'] ?? null)) {
         throw new RuntimeException('The app inspection did not return a valid environment.');
     }
