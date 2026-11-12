@@ -5,8 +5,6 @@ declare(strict_types=1);
 use ShipperCli\ProviderEasyPanel\EasyPanelClient;
 use ShipperCli\ProviderEasyPanel\EasyPanelProvider;
 
-const SCHEDULER_COMMAND = "echo 'ShipperCLI scheduled ''fixture executed' >> /proc/1/fd/1";
-
 $shipper = getenv('SHIPPER_E2E_BIN');
 $published = is_string($shipper) && $shipper !== '';
 $worker = getenv('SHIPPER_E2E_WORKER') === 'true';
@@ -37,6 +35,11 @@ if (! is_string($name) || ! preg_match('/\Ae[a-f0-9]{12}\z/', $name)) {
 $prefix = 's-';
 $expectedProject = $prefix.$name.'-v1-'.substr(hash('sha256', json_encode([$name, 'v1'], JSON_THROW_ON_ERROR)), 0, 20);
 $expectedService = 'web';
+$schedulerPath = '/shipper-cron-'.bin2hex(random_bytes(12));
+$schedulerUrl = 'http://'.$expectedProject.'_'.$expectedService.$schedulerPath;
+// Nginx logs the request even though this unique path returns 404.
+$schedulerCommand = 'curl --max-time 5 -sS '.escapeshellarg($schedulerUrl)
+    .' || wget -T 5 -qO- '.escapeshellarg($schedulerUrl);
 $source = $sourceType === 'git' ? [
     'type' => 'git',
     'repo' => 'https://github.com/shippercli/provider-easypanel.git',
@@ -61,8 +64,8 @@ $provider = new EasyPanelProvider([
     'source' => $source,
 ], $client);
 
-$project = new class($name, $worker, $scheduler) {
-    public function __construct(private readonly string $name, private readonly bool $worker, private readonly bool $scheduler) {}
+$project = new class($name, $worker, $scheduler, $schedulerCommand) {
+    public function __construct(private readonly string $name, private readonly bool $worker, private readonly bool $scheduler, private readonly string $schedulerCommand) {}
 
     public function name(): string
     {
@@ -86,9 +89,10 @@ $project = new class($name, $worker, $scheduler) {
 
     public function cron(): array
     {
-        return $this->scheduler ? ['sample' => new class {
+        return $this->scheduler ? ['sample' => new class($this->schedulerCommand) {
+            public function __construct(private readonly string $command) {}
             public function frequency(): string { return '* * * * *'; }
-            public function command(): string { return SCHEDULER_COMMAND; }
+            public function command(): string { return $this->command; }
         }] : [];
     }
 
@@ -256,7 +260,7 @@ try {
             if (is_array($script) && ($script['name'] ?? null) === 'sample'
                 && ($script['schedule'] ?? null) === '* * * * *'
                 && ($script['enabled'] ?? false) === true
-                && ($script['content'] ?? null) === SCHEDULER_COMMAND) {
+                && ($script['content'] ?? null) === $schedulerCommand) {
                 $registered = true;
                 break;
             }
@@ -279,18 +283,18 @@ try {
                     echo "EasyPanel disposable Box container is running.\n";
                 }
             }
-            $logs = $client->queryServiceLogs($expectedProject, 'scheduler', ['limit' => 30]);
+            $logs = $client->queryServiceLogs($expectedProject, $expectedService, ['limit' => 30]);
             foreach ($logs as $record) {
                 $message = $record['message'] ?? $record['line'] ?? $record['text'] ?? null;
-                if (is_string($message) && str_contains($message, 'ShipperCLI scheduled fixture executed')) {
+                if (is_string($message) && str_contains($message, 'GET '.$schedulerPath.' HTTP/')) {
                     echo "EasyPanel disposable scheduled command execution verified.\n";
                     break 2;
                 }
             }
             if ($attempt === 25) {
                 throw new RuntimeException($boxRunning
-                    ? 'The Box container ran, but the scheduled command did not emit its expected log output.'
-                    : 'EasyPanel did not report a running Box container or the expected scheduled command output.');
+                    ? 'The Box container ran, but the web service did not log the expected scheduled request.'
+                    : 'EasyPanel reported neither a running Box container nor the expected scheduled request.');
             }
             sleep(5);
         }
