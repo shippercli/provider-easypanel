@@ -29,12 +29,14 @@ def query():
                          authSource='admin', serverSelectionTimeoutMS=3000,
                          timeoutMS=3000) as connection:
             status = connection.admin.command('connectionStatus')
-            return {'user': username, 'db': 'admin'} in status['authInfo']['authenticatedUsers']
+            if {'user': username, 'db': 'admin'} not in status['authInfo']['authenticatedUsers']:
+                return False
+            return connection[database].probe.find_one() is None
 
     if DATASTORE == 'redis':
         from redis import Redis
 
-        with Redis(host=host, password=password, socket_connect_timeout=3,
+        with Redis(host=host, username=username, password=password, socket_connect_timeout=3,
                    socket_timeout=3) as connection:
             return connection.ping()
 
