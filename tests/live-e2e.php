@@ -13,10 +13,11 @@ $sourceType = getenv('SHIPPER_E2E_SOURCE') ?: 'image';
 if ($scheduler && ($worker || $published || $sourceType !== 'git')) {
     throw new RuntimeException('The scheduler fixture requires an unpublished public Git deployment.');
 }
-$expectedBody = match ($worker ? 'worker' : $sourceType) {
-    'worker' => 'ShipperCLI EasyPanel worker fixture web app',
-    'git' => 'ShipperCLI EasyPanel public Git fixture',
-    'image' => '<title>Welcome to nginx!</title>',
+$expectedBody = match (true) {
+    $worker => 'ShipperCLI EasyPanel worker fixture web app',
+    $scheduler => 'ShipperCLI EasyPanel scheduler fixture',
+    $sourceType === 'git' => 'ShipperCLI EasyPanel public Git fixture',
+    $sourceType === 'image' => '<title>Welcome to nginx!</title>',
     default => throw new RuntimeException('Unsupported live fixture source.'),
 };
 require $published ? dirname($shipper, 2).'/autoload.php' : dirname(__DIR__).'/vendor/autoload.php';
@@ -35,20 +36,19 @@ if (! is_string($name) || ! preg_match('/\Ae[a-f0-9]{12}\z/', $name)) {
 $prefix = 's-';
 $expectedProject = $prefix.$name.'-v1-'.substr(hash('sha256', json_encode([$name, 'v1'], JSON_THROW_ON_ERROR)), 0, 20);
 $expectedService = 'web';
-$schedulerPath = '/shipper-cron-'.bin2hex(random_bytes(12));
-$manualPath = '/shipper-manual-'.bin2hex(random_bytes(12));
-// Nginx logs the request even though this unique path returns 404.
+$cronNonce = bin2hex(random_bytes(12));
+$manualNonce = bin2hex(random_bytes(12));
 $probeCommand = static function (string $path) use ($expectedProject, $expectedService): string {
     $target = escapeshellarg('http://'.$expectedProject.'_'.$expectedService.$path);
 
-    return 'curl --max-time 5 -sS '.$target.' || wget -T 5 -qO- '.$target;
+    return 'curl --max-time 5 -fsS '.$target.' || wget -T 5 -qO- '.$target;
 };
-$schedulerCommand = $probeCommand($schedulerPath);
+$schedulerCommand = $probeCommand('/record/cron/'.$cronNonce);
 $source = $sourceType === 'git' ? [
     'type' => 'git',
     'repo' => 'https://github.com/shippercli/provider-easypanel.git',
     'ref' => getenv('GITHUB_REF_NAME') ?: 'main',
-    'path' => '/tests/fixtures/public-git',
+    'path' => $scheduler ? '/tests/fixtures/scheduler' : '/tests/fixtures/public-git',
 ] : [
     'type' => 'image',
     'image' => 'nginx:alpine',
@@ -273,27 +273,29 @@ try {
             throw new RuntimeException('The disposable Box did not report the configured scheduled script.');
         }
         echo "EasyPanel disposable Box script registration verified.\n";
-        $runnerPath = '/?shipper-runner='.bin2hex(random_bytes(12));
-        $runner = curl_init('https://'.$domainHost.$runnerPath);
-        if ($runner === false) {
-            throw new RuntimeException('Unable to initialize the disposable runner probe.');
+        $readMarker = static function (string $path, string $nonce) use ($domainHost): bool {
+            $handle = curl_init('https://'.$domainHost.$path);
+            if ($handle === false) {
+                throw new RuntimeException('Unable to initialize the disposable marker request.');
+            }
+            curl_setopt_array($handle, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 10,
+                CURLOPT_PROTOCOLS_STR => 'HTTPS',
+            ]);
+            $body = curl_exec($handle);
+
+            return curl_getinfo($handle, CURLINFO_RESPONSE_CODE) === 200 && $body === $nonce;
+        };
+        $runnerNonce = bin2hex(random_bytes(12));
+        if (! $readMarker('/record/runner/'.$runnerNonce, $runnerNonce)
+            || ! $readMarker('/check/runner/'.$runnerNonce, $runnerNonce)) {
+            throw new RuntimeException('The disposable app did not record and return the runner control.');
         }
-        curl_setopt_array($runner, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 15,
-            CURLOPT_PROTOCOLS_STR => 'HTTPS',
-        ]);
-        $runnerBody = curl_exec($runner);
-        if (curl_getinfo($runner, CURLINFO_RESPONSE_CODE) !== 200
-            || ! is_string($runnerBody) || ! str_contains($runnerBody, $expectedBody)) {
-            throw new RuntimeException('The disposable runner probe did not reach the expected HTTPS app.');
-        }
-        unset($runner);
-        echo "EasyPanel runner request reached the disposable HTTPS app.\n";
+        echo "EasyPanel runner marker round trip verified.\n";
 
         $boxRunning = false;
         $inspectContainer = true;
-        $runnerObserved = false;
         $manualObserved = false;
         for ($attempt = 1; $attempt <= 25; $attempt++) {
             if ($inspectContainer && ! $boxRunning) {
@@ -315,37 +317,26 @@ try {
                             'projectName' => $expectedProject,
                             'serviceName' => 'scheduler',
                             'name' => 'shipper-manual-probe',
-                            'content' => $probeCommand($manualPath),
+                            'content' => $probeCommand('/record/manual/'.$manualNonce),
                         ], JSON_THROW_ON_ERROR),
                     ]);
                     curl_exec($manual);
                     echo 'EasyPanel manual Box probe HTTP status '.curl_getinfo($manual, CURLINFO_RESPONSE_CODE).".\n";
                 }
             }
-            $logs = $client->queryServiceLogs($expectedProject, $expectedService, ['limit' => 30]);
-            foreach ($logs as $record) {
-                $message = $record['message'] ?? $record['line'] ?? $record['text'] ?? null;
-                if (! $runnerObserved && is_string($message) && str_contains($message, 'GET '.$runnerPath.' HTTP/')) {
-                    $runnerObserved = true;
-                    echo "EasyPanel runner request observed in web service logs.\n";
-                }
-                if (! $manualObserved && is_string($message) && str_contains($message, 'GET '.$manualPath.' HTTP/')) {
-                    $manualObserved = true;
-                    echo "EasyPanel manual Box request observed in web service logs.\n";
-                }
-                if (is_string($message) && str_contains($message, 'GET '.$schedulerPath.' HTTP/')) {
-                    echo "EasyPanel disposable scheduled command execution verified.\n";
-                    break 2;
-                }
+            if (! $manualObserved && $readMarker('/check/manual/'.$manualNonce, $manualNonce)) {
+                $manualObserved = true;
+                echo "EasyPanel disposable app recorded the manual Box request.\n";
+            }
+            if ($readMarker('/check/cron/'.$cronNonce, $cronNonce)) {
+                echo "EasyPanel disposable scheduled command execution verified.\n";
+                break;
             }
             if ($attempt === 25) {
-                if (! $runnerObserved && ! $manualObserved) {
-                    throw new RuntimeException('The web service logs did not show the confirmed runner request or either Box request.');
-                }
                 throw new RuntimeException($boxRunning
                     ? ($manualObserved
-                        ? 'The web service logged the manual Box request. The scheduled request was absent.'
-                        : 'The web service logged neither the manual Box request nor the scheduled request.')
+                        ? 'The app recorded the manual Box request. The scheduled request was absent.'
+                        : 'The app recorded neither the manual Box request nor the scheduled request.')
                     : 'EasyPanel reported neither a running Box container nor the expected scheduled request.');
             }
             sleep(5);
