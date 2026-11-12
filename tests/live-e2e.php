@@ -273,8 +273,27 @@ try {
             throw new RuntimeException('The disposable Box did not report the configured scheduled script.');
         }
         echo "EasyPanel disposable Box script registration verified.\n";
+        $runnerPath = '/?shipper-runner='.bin2hex(random_bytes(12));
+        $runner = curl_init('https://'.$domainHost.$runnerPath);
+        if ($runner === false) {
+            throw new RuntimeException('Unable to initialize the disposable runner probe.');
+        }
+        curl_setopt_array($runner, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 15,
+            CURLOPT_PROTOCOLS_STR => 'HTTPS',
+        ]);
+        $runnerBody = curl_exec($runner);
+        if (curl_getinfo($runner, CURLINFO_RESPONSE_CODE) !== 200
+            || ! is_string($runnerBody) || ! str_contains($runnerBody, $expectedBody)) {
+            throw new RuntimeException('The disposable runner probe did not reach the expected HTTPS app.');
+        }
+        unset($runner);
+        echo "EasyPanel runner request reached the disposable HTTPS app.\n";
+
         $boxRunning = false;
         $inspectContainer = true;
+        $runnerObserved = false;
         $manualObserved = false;
         for ($attempt = 1; $attempt <= 25; $attempt++) {
             if ($inspectContainer && ! $boxRunning) {
@@ -306,6 +325,10 @@ try {
             $logs = $client->queryServiceLogs($expectedProject, $expectedService, ['limit' => 30]);
             foreach ($logs as $record) {
                 $message = $record['message'] ?? $record['line'] ?? $record['text'] ?? null;
+                if (! $runnerObserved && is_string($message) && str_contains($message, 'GET '.$runnerPath.' HTTP/')) {
+                    $runnerObserved = true;
+                    echo "EasyPanel runner request observed in web service logs.\n";
+                }
                 if (! $manualObserved && is_string($message) && str_contains($message, 'GET '.$manualPath.' HTTP/')) {
                     $manualObserved = true;
                     echo "EasyPanel manual Box request observed in web service logs.\n";
@@ -316,6 +339,9 @@ try {
                 }
             }
             if ($attempt === 25) {
+                if (! $runnerObserved && ! $manualObserved) {
+                    throw new RuntimeException('The web service logs did not show the confirmed runner request or either Box request.');
+                }
                 throw new RuntimeException($boxRunning
                     ? ($manualObserved
                         ? 'The web service logged the manual Box request. The scheduled request was absent.'
