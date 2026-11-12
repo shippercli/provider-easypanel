@@ -58,9 +58,6 @@ jobs:
           php-version: '8.3'
           coverage: none
       - run: composer install --no-interaction --prefer-dist
-      - name: Recover the exact failed scheduler fixture
-        if: github.ref == 'refs/heads/codex/easypanel-scheduler-live' && inputs.scheduler
-        run: php tests/inspect-scheduler-fixture.php
       - name: Deploy, verify and clean up disposable app
         env:
           SHIPPER_E2E_SOURCE: ${{ inputs.scheduler && 'git' || inputs.source || 'image' }}

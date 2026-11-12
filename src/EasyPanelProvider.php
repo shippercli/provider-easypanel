@@ -717,8 +717,16 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                 'webhookToken' => $this->cronWebhookToken($projectName, (string) $name),
             ];
         }
-        $client->updateBoxScripts($projectName, $serviceName, $scripts);
-        $client->restartBoxService($projectName, $serviceName);
+        try {
+            $client->updateBoxScripts($projectName, $serviceName, $scripts);
+        } catch (\RuntimeException $exception) {
+            throw new \RuntimeException('EasyPanel scheduler script update failed: '.$exception->getMessage(), 0, $exception);
+        }
+        try {
+            $client->restartBoxService($projectName, $serviceName);
+        } catch (\RuntimeException $exception) {
+            throw new \RuntimeException('EasyPanel scheduler restart failed: '.$exception->getMessage(), 0, $exception);
+        }
     }
 
     private function cronSchedule(string $frequency): string
