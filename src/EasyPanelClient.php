@@ -449,7 +449,7 @@ final class EasyPanelClient
             $result = $shape instanceof \stdClass ? ($shape->result ?? null) : null;
             $data = $result instanceof \stdClass ? ($result->data ?? null) : null;
             fwrite(STDERR, sprintf(
-                "EasyPanel probe %s: response=%s result=%s data=%s directJson=%d nestedJson=%d emptyData=%d emptyResult=%d\n",
+                "EasyPanel probe %s: response=%s result=%s data=%s directJson=%d nestedJson=%d emptyData=%d emptyResult=%d emptyResponse=%d explicitSuccess=%d\n",
                 $procedure,
                 gettype($shape),
                 gettype($result),
@@ -458,6 +458,8 @@ final class EasyPanelClient
                 $data instanceof \stdClass && property_exists($data, 'json'),
                 $data instanceof \stdClass && (array) $data === [],
                 $result instanceof \stdClass && (array) $result === [],
+                $shape instanceof \stdClass && (array) $shape === [],
+                $shape instanceof \stdClass && ($shape->success ?? null) === true,
             ));
         }
         if (! $shape instanceof \stdClass) {

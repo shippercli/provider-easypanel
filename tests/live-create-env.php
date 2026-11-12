@@ -103,6 +103,9 @@ try {
         } catch (RuntimeException) {
             echo "Image update response was rejected by the client.\n";
         }
+        $updated = $client->inspectAppService($project, $service);
+        $matches = in_array('nginx:alpine', [$updated['image'] ?? null, $updated['source']['image'] ?? null], true);
+        echo $matches ? "Requested image confirmed by inspection.\n" : "Inspection did not confirm the requested image.\n";
         try {
             $client->destroyAppService($project, $service);
         } catch (RuntimeException) {
