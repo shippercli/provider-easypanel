@@ -6,8 +6,8 @@ use ShipperCli\ProviderEasyPanel\EasyPanelClient;
 
 require dirname(__DIR__).'/vendor/autoload.php';
 
-// This project was verified absent before its random name was first used in run 43245994449.
-$project = 's-e70c71de827cb-v1-13eab427b47dccc6248a';
+// This project was verified absent before its random name was first used in run 43246645234.
+$project = 's-e34c5a22a96b7-v1-a3a605687f9ccdb6c64b';
 $client = new EasyPanelClient(getenv('EASYPANEL_URL'), getenv('EASYPANEL_AUTH_TOKEN'), timeout: 45);
 $exists = static fn (array $inventory): bool => in_array($project, array_column($inventory['projects'], 'name'), true);
 
@@ -33,6 +33,13 @@ $environment = is_string($app['env'] ?? null) ? preg_split('/\R/', $app['env']) 
 if (! in_array('SHIPPERCLI_MANAGED=1', $environment, true)
     || ! in_array('SHIPPERCLI_MANAGED_PROJECT='.$project, $environment, true)) {
     throw new RuntimeException('Recovery stopped because fixture ownership could not be confirmed.');
+}
+
+try {
+    $client->cloneBoxRepository($project, 'scheduler', 'https://github.com/shippercli/provider-easypanel.git', 'main');
+    echo "The Box Git clone returned the documented acknowledgement.\n";
+} catch (RuntimeException $exception) {
+    echo $exception->getMessage().PHP_EOL;
 }
 
 try {

@@ -58,10 +58,11 @@ jobs:
           php-version: '8.3'
           coverage: none
       - run: composer install --no-interaction --prefer-dist
-      - name: Recover the disposable project from run 43245994449
+      - name: Recover the disposable project from run 43246645234
         if: github.ref == 'refs/heads/codex/easypanel-scheduler-live' && inputs.scheduler
         run: php tests/recover-scheduler-fixture.php
       - name: Deploy, verify and clean up disposable app
+        if: github.ref != 'refs/heads/codex/easypanel-scheduler-live' || !inputs.scheduler
         env:
           SHIPPER_E2E_SOURCE: ${{ inputs.scheduler && 'git' || inputs.source || 'image' }}
           SHIPPER_E2E_SCHEDULER: ${{ inputs.scheduler }}

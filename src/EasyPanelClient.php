@@ -127,8 +127,14 @@ final class EasyPanelClient
         } catch (\RuntimeException $exception) {
             throw new \RuntimeException('EasyPanel Box Git clone failed: '.$exception->getMessage(), $exception->getCode(), $exception);
         }
-        if (\trim($response) !== 'null') {
-            throw new \RuntimeException('EasyPanel returned an unexpected Box Git clone response.');
+        $body = \trim($response);
+        if ($body !== 'null') {
+            $shape = match (true) {
+                $body === '' => 'empty body',
+                \str_starts_with($body, '<') => 'markup',
+                default => \get_debug_type(\json_decode($body)).' decoded body',
+            };
+            throw new \RuntimeException('EasyPanel returned an unexpected Box Git clone response ('.$shape.').');
         }
     }
 
