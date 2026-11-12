@@ -20,6 +20,8 @@ class WorkloadReadbackTest(unittest.TestCase):
             def do_POST(self):
                 parts = self.path.strip('/').split('/')
                 workload, case, project, procedure = parts[0], parts[1], parts[2], parts[-1]
+                if procedure in ['projects.createProject', 'createAppService']:
+                    raise AssertionError('Workload readback must use the existing owned app')
                 body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))['json']
                 authorizations.append(self.headers.get('Authorization'))
                 if self.headers.get('Authorization') != 'synthetic-authorization-secret':
