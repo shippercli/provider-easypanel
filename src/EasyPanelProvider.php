@@ -407,10 +407,16 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             }
             if ($this->booleanConfig('destroy_project', true)) {
                 if (! $this->projectHasServices($remaining, $projectName)) {
-                    $client->destroyProject($projectName);
+                    $deletionError = null;
+                    try {
+                        $client->destroyProject($projectName);
+                    } catch (\RuntimeException $exception) {
+                        // EasyPanel can delete the project even when its response cannot be decoded.
+                        $deletionError = $exception;
+                    }
                     $afterProject = $client->listProjectsAndServices();
                     if ($this->projectExists($afterProject, $projectName)) {
-                        throw new \RuntimeException('EasyPanel project deletion remains unconfirmed; the project is still visible. Recheck before retrying.');
+                        throw $deletionError ?? new \RuntimeException('EasyPanel project deletion remains unconfirmed; the project is still visible. Recheck before retrying.');
                     }
                 }
             }

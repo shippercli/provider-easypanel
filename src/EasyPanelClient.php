@@ -76,7 +76,7 @@ final class EasyPanelClient
 
     public function destroyProject(string $projectName): void
     {
-        $this->call('projects.destroyProject', ['projectName' => $projectName]);
+        $this->call('projects.destroyProject', ['name' => $projectName]);
     }
 
     public function createAppService(string $projectName, string $serviceName): void
