@@ -209,7 +209,7 @@ jobs:
         env:
           COMPOSER_HOME: ${{ runner.temp }}/shipper-composer
         run: |
-          composer global require --no-interaction --prefer-dist shippercli/cli:1.0.5 shippercli/provider-easypanel:2.0.4
+          composer global require --no-interaction --prefer-dist shippercli/cli:1.0.6 shippercli/provider-easypanel:2.1.0
           echo "$COMPOSER_HOME/vendor/bin" >> "$GITHUB_PATH"
       - name: Install and validate through the published Shipper Action
         if: matrix.installation == 'action'
@@ -219,8 +219,8 @@ jobs:
           EASYPANEL_AUTH_TOKEN: ${{ secrets.EASYPANEL_AUTH_TOKEN }}
         with:
           command: validate
-          cli-version: '1.0.5'
-          providers: shippercli/provider-easypanel:2.0.4
+          cli-version: '1.0.6'
+          providers: shippercli/provider-easypanel:2.1.0
           working-directory: published-fixture
       - name: Verify published deployment, HTTPS, and cleanup
         working-directory: published-fixture
