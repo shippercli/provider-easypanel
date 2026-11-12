@@ -97,6 +97,24 @@ try {
         throw new RuntimeException('The app inspection did not return a valid environment.');
     }
     $persisted = in_array($marker, preg_split('/\R/', $details['env']) ?: [], true);
+    if ($persisted) {
+        try {
+            $client->updateImageSource($project, $service, 'nginx:alpine');
+        } catch (RuntimeException) {
+            echo "Image update response was rejected by the client.\n";
+        }
+        try {
+            $client->destroyAppService($project, $service);
+        } catch (RuntimeException) {
+            echo "App destroy response was rejected by the client.\n";
+        }
+        $remaining = array_filter(
+            $client->listProjectsAndServices()['services'],
+            static fn (array $entry): bool => $entry['projectName'] === $project && $entry['name'] === $service,
+        );
+        echo $remaining === [] ? "App absent after destroy call.\n" : "App still present after destroy call.\n";
+    }
+
 } finally {
     $inventory = $client->listProjectsAndServices();
     foreach ($inventory['services'] as $entry) {
