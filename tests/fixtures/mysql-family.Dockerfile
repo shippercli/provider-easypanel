@@ -11,9 +11,13 @@ try {
         getenv('DB_PASSWORD'),
         [PDO::ATTR_TIMEOUT => 3],
     );
-    if (stripos((string) $database->query('SELECT VERSION()')->fetchColumn(), 'mariadb') !== false) {
-        echo 'shippercli-mariadb-query-ok';
-        return;
+    $version = $database->query('SELECT VERSION()')->fetchColumn();
+    if (is_string($version) && $version !== '') {
+        $engine = stripos($version, 'mariadb') === false ? 'mysql' : 'mariadb';
+        if ($engine === '@DATASTORE@') {
+            echo 'shippercli-'.$engine.'-query-ok';
+            return;
+        }
     }
 } catch (Throwable) {
     // Keep credentials and connection diagnostics out of the public probe response.

@@ -10,7 +10,7 @@ $published = is_string($shipper) && $shipper !== '';
 $worker = getenv('SHIPPER_E2E_WORKER') === 'true';
 $scheduler = getenv('SHIPPER_E2E_SCHEDULER') === 'true';
 $database = getenv('SHIPPER_E2E_DATABASE') ?: 'none';
-if (! in_array($database, ['none', 'mariadb', 'postgres', 'mongo', 'redis'], true)) {
+if (! in_array($database, ['none', 'mysql', 'mariadb', 'postgres', 'mongo', 'redis'], true)) {
     throw new RuntimeException('Unsupported live database fixture.');
 }
 $withDatabase = $database !== 'none';
@@ -82,7 +82,7 @@ $source = match ($sourceType) {
 if ($worker || $withDatabase) {
     $fixture = match ($database) {
         'none' => 'worker',
-        'mariadb' => 'mariadb',
+        'mysql', 'mariadb' => 'mysql-family',
         default => 'datastore',
     };
     $dockerfile = file_get_contents(__DIR__.'/fixtures/'.$fixture.'.Dockerfile');
