@@ -22,9 +22,12 @@ class WorkloadReadbackTest(unittest.TestCase):
                 workload, case, project, procedure = parts[0], parts[1], parts[2], parts[-1]
                 if procedure in ['projects.createProject', 'createAppService']:
                     raise AssertionError('Workload readback must use the existing owned app')
-                body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))['json']
+                public_box_request = procedure in {'initBoxService', 'gitBoxClone'}
+                payload = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                body = payload if public_box_request else payload['json']
                 authorizations.append(self.headers.get('Authorization'))
-                if self.headers.get('Authorization') != 'synthetic-authorization-secret':
+                expected_auth = 'Bearer synthetic-authorization-secret' if public_box_request else 'synthetic-authorization-secret'
+                if self.headers.get('Authorization') != expected_auth:
                     raise AssertionError('Synthetic authorization missing')
                 trace = traces.setdefault((workload, case), [])
                 trace.append(procedure + ':' + body.get('serviceName', ''))
@@ -36,6 +39,12 @@ class WorkloadReadbackTest(unittest.TestCase):
                 record.setdefault(target, f'DB_PASSWORD=retained-secret\n{owned}')
                 record.setdefault('written', set())
 
+                if public_box_request:
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(b'null')
+                    return
                 if procedure == 'projects.listProjectsAndServices':
                     data = {'projects': [{'name': project}], 'services': [
                         {'projectName': project, 'name': 'app', 'type': 'app'},
@@ -49,6 +58,8 @@ class WorkloadReadbackTest(unittest.TestCase):
                         if case == 'wrong-type': data = {'env': False}
                         if workload == 'scheduler' and case == 'saved-flat': data = {'env': record[key]}
                         elif workload == 'scheduler' and case != 'wrong-type' and case != 'missing': data = {'env': {'content': record[key]}}
+                    if workload == 'scheduler' and key == target:
+                        data['codeInitialized'] = case != 'saved'
                 elif procedure.endswith('.updateEnv'):
                     service = body['serviceName']
                     key = service
@@ -89,10 +100,14 @@ class WorkloadReadbackTest(unittest.TestCase):
                             if case not in ['saved', 'saved-flat']:
                                 self.assertNotIn('services.app.updateDeploy:worker-default', calls)
                         else:
+                            self.assertEqual('initBoxService:scheduler' in calls, case == 'saved')
+                            self.assertEqual('gitBoxClone:scheduler' in calls, case in ['saved', 'saved-flat'])
+                            if case == 'saved':
+                                self.assertLess(readback_index, calls.index('initBoxService:scheduler'))
+                                self.assertLess(calls.index('initBoxService:scheduler'), calls.index('gitBoxClone:scheduler'))
                             self.assertEqual('services.box.updateScripts:scheduler' in calls, case in ['saved', 'saved-flat'])
                             self.assertEqual('services.box.restartService:scheduler' in calls, case in ['saved', 'saved-flat'])
                 self.assertTrue(authorizations)
-                self.assertTrue(all(value == 'synthetic-authorization-secret' for value in authorizations))
             finally:
                 server.shutdown()
                 thread.join(timeout=2)

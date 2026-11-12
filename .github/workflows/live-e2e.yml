@@ -16,6 +16,10 @@ on:
         description: Exercise a disposable queue worker with the inline Dockerfile fixture
         type: boolean
         default: false
+      scheduler:
+        description: Exercise scheduled Box scripts with the public Git fixture
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -33,6 +37,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  reject-published-scheduler:
+    if: github.event_name == 'workflow_dispatch' && inputs.published && inputs.scheduler
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo '::error::The scheduler fixture requires a source checkout. Dispatch with published=false.'
+          exit 1
+
   disposable-lifecycle:
     if: >-
       inputs.published != true &&
@@ -40,7 +52,8 @@ jobs:
        (github.event_name == 'workflow_dispatch' &&
         (github.ref == 'refs/heads/audit/2026-10-14-fixes' ||
          github.ref == 'refs/heads/codex/easypanel-public-git' ||
-         github.ref == 'refs/heads/codex/easypanel-worker-live')))
+         github.ref == 'refs/heads/codex/easypanel-worker-live' ||
+         github.ref == 'refs/heads/codex/easypanel-scheduler-live')))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -55,13 +68,14 @@ jobs:
       - run: composer install --no-interaction --prefer-dist
       - name: Deploy, verify and clean up disposable app
         env:
-          SHIPPER_E2E_SOURCE: ${{ inputs.source || 'image' }}
+          SHIPPER_E2E_SOURCE: ${{ inputs.scheduler && 'git' || inputs.source || 'image' }}
+          SHIPPER_E2E_SCHEDULER: ${{ inputs.scheduler }}
           SHIPPER_E2E_WORKER: ${{ inputs.worker }}
         run: php tests/live-e2e.php
 
   published-lifecycle:
     if: >-
-      github.event_name == 'workflow_dispatch' && inputs.published &&
+      github.event_name == 'workflow_dispatch' && inputs.published && !inputs.scheduler &&
       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/easypanel-worker-release')
     runs-on: ubuntu-latest
     timeout-minutes: 12

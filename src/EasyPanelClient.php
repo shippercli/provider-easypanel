@@ -108,15 +108,48 @@ final class EasyPanelClient
         ]);
     }
 
+    public function initializeBoxService(string $projectName, string $serviceName): void
+    {
+        $input = ['projectName' => $projectName, 'serviceName' => $serviceName];
+        if ($this->transport !== null) {
+            ($this->transport)('initBoxService', $input);
+            return;
+        }
+
+        $response = \trim($this->post('/api/initBoxService', 'Bearer '.$this->authToken, $input));
+        if ($response !== '' && $response !== 'null') {
+            throw new \RuntimeException('EasyPanel returned an unexpected Box initialization response.');
+        }
+    }
+
     public function cloneBoxRepository(string $projectName, string $serviceName, string $url, string $branch, bool $private = false): void
     {
-        $this->call('services.box.cloneGitRepository', [
+        $input = [
             'projectName' => $projectName,
             'serviceName' => $serviceName,
             'url' => $url,
             'branch' => $branch,
             'private' => $private,
-        ]);
+        ];
+        if ($this->transport !== null) {
+            ($this->transport)('gitBoxClone', $input);
+            return;
+        }
+
+        try {
+            $response = $this->post('/api/gitBoxClone', 'Bearer '.$this->authToken, $input);
+        } catch (\RuntimeException $exception) {
+            throw new \RuntimeException('EasyPanel Box Git clone failed: '.$exception->getMessage(), $exception->getCode(), $exception);
+        }
+        $body = \trim($response);
+        // EasyPanel can acknowledge the clone with an empty 2xx body.
+        if ($body !== '' && $body !== 'null') {
+            $shape = match (true) {
+                \str_starts_with($body, '<') => 'markup',
+                default => \get_debug_type(\json_decode($body)).' decoded body',
+            };
+            throw new \RuntimeException('EasyPanel returned an unexpected Box Git clone response ('.$shape.').');
+        }
     }
 
     public function updateBoxEnvironment(string $projectName, string $serviceName, string $env): void
@@ -577,6 +610,10 @@ final class EasyPanelClient
             'services.app.updateSourceDockerfile',
             'services.app.updateEnv',
             'services.app.destroyService',
+            'services.box.updateEnv',
+            'services.box.updateScripts',
+            'services.box.restartService',
+            'services.box.destroyService',
         ], true)) {
             return $shape;
         }
