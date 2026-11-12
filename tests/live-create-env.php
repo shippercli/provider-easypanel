@@ -106,6 +106,18 @@ try {
         $updated = $client->inspectAppService($project, $service);
         $matches = in_array('nginx:alpine', [$updated['image'] ?? null, $updated['source']['image'] ?? null], true);
         echo $matches ? "Requested image confirmed by inspection.\n" : "Inspection did not confirm the requested image.\n";
+        $extra = 'SHIPPERCLI_PROBE_ENV=expected';
+        try {
+            $client->updateEnvironment($project, $service, $marker."\n".$extra);
+        } catch (RuntimeException) {
+            echo "Environment update response was rejected by the client.\n";
+        }
+        $saved = $client->inspectAppService($project, $service)['env'] ?? null;
+        $savedLines = is_string($saved) ? (preg_split('/\R/', $saved) ?: []) : [];
+        if (! in_array($marker, $savedLines, true) || ! in_array($extra, $savedLines, true)) {
+            throw new RuntimeException('Updated environment could not be confirmed.');
+        }
+        echo "Environment update confirmed by inspection.\n";
         try {
             $client->destroyAppService($project, $service);
         } catch (RuntimeException) {
