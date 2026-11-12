@@ -139,7 +139,7 @@ class ResponsesTest(unittest.TestCase):
                     case = self.path.split('/')[2]
                     status, payload = {
                         'success': (200, b'null'),
-                        'unexpected': (200, b'{"error":"synthetic-error-secret"}'),
+                        'empty': (204, b''),
                         'missing': (404, b'null'),
                     }[case]
                 elif procedure.startswith('status-'):

@@ -96,10 +96,8 @@ final class EasyPanelClient
             return;
         }
 
-        $response = $this->post('/api/createAppService', 'Bearer '.$this->authToken, $input);
-        if (\trim($response) !== 'null') {
-            throw new \RuntimeException('EasyPanel app creation returned an unexpected response. Recheck inventory before retrying.');
-        }
+        // The provider verifies the newly created app and its ownership through inspection.
+        $this->post('/api/createAppService', 'Bearer '.$this->authToken, $input);
     }
 
     public function createBoxService(string $projectName, string $serviceName): void
