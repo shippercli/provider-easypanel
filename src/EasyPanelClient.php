@@ -110,13 +110,26 @@ final class EasyPanelClient
 
     public function cloneBoxRepository(string $projectName, string $serviceName, string $url, string $branch, bool $private = false): void
     {
-        $this->call('services.box.cloneGitRepository', [
+        $input = [
             'projectName' => $projectName,
             'serviceName' => $serviceName,
             'url' => $url,
             'branch' => $branch,
             'private' => $private,
-        ]);
+        ];
+        if ($this->transport !== null) {
+            ($this->transport)('gitBoxClone', $input);
+            return;
+        }
+
+        try {
+            $response = $this->post('/api/gitBoxClone', 'Bearer '.$this->authToken, $input);
+        } catch (\RuntimeException $exception) {
+            throw new \RuntimeException('EasyPanel Box Git clone failed: '.$exception->getMessage(), $exception->getCode(), $exception);
+        }
+        if (\trim($response) !== 'null') {
+            throw new \RuntimeException('EasyPanel returned an unexpected Box Git clone response.');
+        }
     }
 
     public function updateBoxEnvironment(string $projectName, string $serviceName, string $env): void

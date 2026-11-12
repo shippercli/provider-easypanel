@@ -473,7 +473,7 @@ final class EasyPanelProviderTest extends TestCase
         self::assertSame('0 0 * * *', $scriptCall[0][1]['scripts'][0]['schedule']);
         self::assertSame('php artisan schedule:run', $scriptCall[0][1]['scripts'][0]['content']);
         self::assertNotEmpty($scriptCall[0][1]['scripts'][0]['webhookToken']);
-        $cloneCalls = array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'services.box.cloneGitRepository'));
+        $cloneCalls = array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'gitBoxClone'));
         self::assertCount(1, $cloneCalls);
         self::assertFalse($cloneCalls[0][1]['private']);
     }
