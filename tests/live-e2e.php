@@ -5,7 +5,7 @@ declare(strict_types=1);
 use ShipperCli\ProviderEasyPanel\EasyPanelClient;
 use ShipperCli\ProviderEasyPanel\EasyPanelProvider;
 
-const SCHEDULER_COMMAND = "echo 'ShipperCLI scheduled ''fixture executed'";
+const SCHEDULER_COMMAND = "echo 'ShipperCLI scheduled ''fixture executed' >> /proc/1/fd/1";
 
 $shipper = getenv('SHIPPER_E2E_BIN');
 $published = is_string($shipper) && $shipper !== '';
@@ -265,7 +265,20 @@ try {
             throw new RuntimeException('The disposable Box did not report the configured scheduled script.');
         }
         echo "EasyPanel disposable Box script registration verified.\n";
-        for ($attempt = 1; $attempt <= 18; $attempt++) {
+        $boxRunning = false;
+        $inspectContainer = true;
+        for ($attempt = 1; $attempt <= 25; $attempt++) {
+            if ($inspectContainer && ! $boxRunning) {
+                try {
+                    $boxRunning = $client->hasRunningAppContainer($expectedProject, 'scheduler');
+                } catch (RuntimeException) {
+                    $inspectContainer = false;
+                    echo "EasyPanel could not report Box container state.\n";
+                }
+                if ($boxRunning) {
+                    echo "EasyPanel disposable Box container is running.\n";
+                }
+            }
             $logs = $client->queryServiceLogs($expectedProject, 'scheduler', ['limit' => 30]);
             foreach ($logs as $record) {
                 $message = $record['message'] ?? $record['line'] ?? $record['text'] ?? null;
@@ -274,8 +287,10 @@ try {
                     break 2;
                 }
             }
-            if ($attempt === 18) {
-                throw new RuntimeException('The scheduled command did not emit its expected log output.');
+            if ($attempt === 25) {
+                throw new RuntimeException($boxRunning
+                    ? 'The Box container ran, but the scheduled command did not emit its expected log output.'
+                    : 'EasyPanel did not report a running Box container or the expected scheduled command output.');
             }
             sleep(5);
         }
