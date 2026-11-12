@@ -7,6 +7,12 @@ use ShipperCli\ProviderEasyPanel\EasyPanelProvider;
 
 $shipper = getenv('SHIPPER_E2E_BIN');
 $published = is_string($shipper) && $shipper !== '';
+$sourceType = getenv('SHIPPER_E2E_SOURCE') ?: 'image';
+$expectedBody = match ($sourceType) {
+    'git' => 'ShipperCLI EasyPanel public Git fixture',
+    'image' => '<title>Welcome to nginx!</title>',
+    default => throw new RuntimeException('Unsupported live fixture source.'),
+};
 require $published ? dirname($shipper, 2).'/autoload.php' : dirname(__DIR__).'/vendor/autoload.php';
 
 $url = getenv('EASYPANEL_URL');
@@ -23,16 +29,22 @@ if (! is_string($name) || ! preg_match('/\Ae[a-f0-9]{12}\z/', $name)) {
 $prefix = 's-';
 $expectedProject = $prefix.$name.'-v1-'.substr(hash('sha256', json_encode([$name, 'v1'], JSON_THROW_ON_ERROR)), 0, 20);
 $expectedService = 'web';
+$source = $sourceType === 'git' ? [
+    'type' => 'git',
+    'repo' => 'https://github.com/shippercli/provider-easypanel.git',
+    'ref' => getenv('GITHUB_REF_NAME') ?: 'main',
+    'path' => '/tests/fixtures/public-git',
+] : [
+    'type' => 'image',
+    'image' => 'nginx:alpine',
+];
 $client = new EasyPanelClient($url, $token, timeout: 45);
 $provider = new EasyPanelProvider([
     'url' => $url,
     'auth_token' => $token,
     'managed_prefix' => $prefix,
     'service_name' => $expectedService,
-    'source' => [
-        'type' => 'image',
-        'image' => 'nginx:alpine',
-    ],
+    'source' => $source,
 ], $client);
 
 $project = new class($name) {
@@ -162,7 +174,7 @@ try {
         $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
         unset($handle);
 
-        if ($status === 200 && is_string($body) && str_contains($body, '<title>Welcome to nginx!</title>')) {
+        if ($status === 200 && is_string($body) && str_contains($body, $expectedBody)) {
             $ready = true;
             break;
         }

@@ -7,6 +7,11 @@ on:
         description: Exercise the published Composer and Action install paths
         type: boolean
         default: false
+      source:
+        description: Source to deploy on the disposable target
+        type: choice
+        options: [image, git]
+        default: image
   push:
     branches: [main]
     paths:
@@ -28,7 +33,9 @@ jobs:
     if: >-
       inputs.published != true &&
       (github.ref == 'refs/heads/main' ||
-       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/audit/2026-10-14-fixes'))
+       (github.event_name == 'workflow_dispatch' &&
+        (github.ref == 'refs/heads/audit/2026-10-14-fixes' ||
+         github.ref == 'refs/heads/codex/easypanel-public-git')))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -42,12 +49,14 @@ jobs:
           coverage: none
       - run: composer install --no-interaction --prefer-dist
       - name: Deploy, verify and clean up disposable app
+        env:
+          SHIPPER_E2E_SOURCE: ${{ inputs.source || 'image' }}
         run: php tests/live-e2e.php
 
   published-lifecycle:
     if: >-
       github.event_name == 'workflow_dispatch' && inputs.published &&
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/easypanel-published-smoke')
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/easypanel-public-git')
     runs-on: ubuntu-latest
     timeout-minutes: 12
     strategy:
@@ -58,6 +67,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Prepare the disposable project configuration
+        env:
+          SHIPPER_E2E_SOURCE: ${{ inputs.source }}
         run: |
           name="e$(openssl rand -hex 6)"
           echo "SHIPPER_E2E_PROJECT=$name" >> "$GITHUB_ENV"
@@ -70,11 +81,26 @@ jobs:
               managed_prefix: "s-"
               service_name: "web"
               source:
+          YAML
+          case "$SHIPPER_E2E_SOURCE" in
+            image)
+              cat >> published-fixture/shipper.yml <<'YAML'
                 type: image
                 image: "nginx:alpine"
-          projects:
           YAML
+              ;;
+            git)
+              cat >> published-fixture/shipper.yml <<YAML
+                type: git
+                repo: "https://github.com/shippercli/provider-easypanel.git"
+                ref: "${GITHUB_REF_NAME}"
+                path: "/tests/fixtures/public-git"
+          YAML
+              ;;
+            *) exit 1 ;;
+          esac
           cat >> published-fixture/shipper.yml <<YAML
+          projects:
             $name:
               provider: easypanel
               profiles:
@@ -108,6 +134,7 @@ jobs:
       - name: Verify published deployment, HTTPS, and cleanup
         working-directory: published-fixture
         env:
+          SHIPPER_E2E_SOURCE: ${{ inputs.source }}
           EASYPANEL_URL: ${{ secrets.EASYPANEL_URL }}
           EASYPANEL_AUTH_TOKEN: ${{ secrets.EASYPANEL_AUTH_TOKEN }}
         run: |
