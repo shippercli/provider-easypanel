@@ -152,11 +152,13 @@ if ($projectExists()) {
     throw new RuntimeException('Disposable project name is already in use.');
 }
 echo "Disposable lifecycle project: {$expectedProject}\n";
+$applyFailed = false;
 
 try {
     if ($published) {
         $runShipper(['apply', $name, '--profile=v1', '--force']);
     } elseif (! $provider->apply($project, $profile)) {
+        $applyFailed = true;
         throw new RuntimeException($provider->getLastError());
     }
 
@@ -289,7 +291,34 @@ try {
     if ($published) {
         $runShipper(['destroy', $name, '--profile=v1', '--force']);
     } elseif (! $provider->destroy($project, $profile)) {
-        throw new RuntimeException('Disposable lifecycle cleanup failed: '.$provider->getLastError());
+        if (! $scheduler || ! $applyFailed) {
+            throw new RuntimeException('Disposable lifecycle cleanup failed: '.$provider->getLastError());
+        }
+
+        // The random project was absent immediately before this fixture attempted to create it.
+        $services = [];
+        foreach ($client->listProjectsAndServices()['services'] as $service) {
+            if (($service['projectName'] ?? null) === $expectedProject) {
+                $services[] = [$service['name'] ?? null, $service['type'] ?? null];
+            }
+        }
+        sort($services);
+        if ($services !== [['scheduler', 'box'], [$expectedService, 'app']]) {
+            throw new RuntimeException('Disposable scheduler cleanup found an unexpected service inventory.');
+        }
+        $web = $client->inspectAppService($expectedProject, $expectedService);
+        $environment = is_string($web['env'] ?? null) ? preg_split('/\R/', $web['env']) : [];
+        if (! in_array('SHIPPERCLI_MANAGED=1', $environment, true)
+            || ! in_array('SHIPPERCLI_MANAGED_PROJECT='.$expectedProject, $environment, true)) {
+            throw new RuntimeException('Disposable scheduler cleanup could not verify web service ownership.');
+        }
+        try {
+            $client->destroyProject($expectedProject);
+        } catch (RuntimeException $exception) {
+            if ($projectExists()) {
+                throw $exception;
+            }
+        }
     }
     if ($projectExists()) {
         throw new RuntimeException('The disposable project is still present after cleanup.');

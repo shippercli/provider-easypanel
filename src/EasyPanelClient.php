@@ -128,9 +128,9 @@ final class EasyPanelClient
             throw new \RuntimeException('EasyPanel Box Git clone failed: '.$exception->getMessage(), $exception->getCode(), $exception);
         }
         $body = \trim($response);
-        if ($body !== 'null') {
+        // EasyPanel can acknowledge the clone with an empty 2xx body.
+        if ($body !== '' && $body !== 'null') {
             $shape = match (true) {
-                $body === '' => 'empty body',
                 \str_starts_with($body, '<') => 'markup',
                 default => \get_debug_type(\json_decode($body)).' decoded body',
             };
