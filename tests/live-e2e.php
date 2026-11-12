@@ -7,6 +7,11 @@ use ShipperCli\ProviderEasyPanel\EasyPanelProvider;
 
 $shipper = getenv('SHIPPER_E2E_BIN');
 $published = is_string($shipper) && $shipper !== '';
+$expectedBody = match ($published ? getenv('SHIPPER_E2E_SOURCE') : false) {
+    'git' => 'ShipperCLI EasyPanel public Git fixture',
+    'image', false => '<title>Welcome to nginx!</title>',
+    default => throw new RuntimeException('Unsupported live fixture source.'),
+};
 require $published ? dirname($shipper, 2).'/autoload.php' : dirname(__DIR__).'/vendor/autoload.php';
 
 $url = getenv('EASYPANEL_URL');
@@ -162,7 +167,7 @@ try {
         $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
         unset($handle);
 
-        if ($status === 200 && is_string($body) && str_contains($body, '<title>Welcome to nginx!</title>')) {
+        if ($status === 200 && is_string($body) && str_contains($body, $expectedBody)) {
             $ready = true;
             break;
         }
