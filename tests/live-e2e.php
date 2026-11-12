@@ -5,10 +5,16 @@ declare(strict_types=1);
 use ShipperCli\ProviderEasyPanel\EasyPanelClient;
 use ShipperCli\ProviderEasyPanel\EasyPanelProvider;
 
+const SCHEDULER_COMMAND = "echo 'ShipperCLI scheduled ''fixture executed'";
+
 $shipper = getenv('SHIPPER_E2E_BIN');
 $published = is_string($shipper) && $shipper !== '';
 $worker = ! $published && getenv('SHIPPER_E2E_WORKER') === 'true';
+$scheduler = getenv('SHIPPER_E2E_SCHEDULER') === 'true';
 $sourceType = getenv('SHIPPER_E2E_SOURCE') ?: 'image';
+if ($scheduler && ($worker || $published || $sourceType !== 'git')) {
+    throw new RuntimeException('The scheduler fixture requires an unpublished public Git deployment.');
+}
 $expectedBody = match ($worker ? 'worker' : $sourceType) {
     'worker' => 'ShipperCLI EasyPanel worker fixture web app',
     'git' => 'ShipperCLI EasyPanel public Git fixture',
@@ -62,8 +68,8 @@ $provider = new EasyPanelProvider([
     'source' => $source,
 ], $client);
 
-$project = new class($name, $worker) {
-    public function __construct(private readonly string $name, private readonly bool $worker) {}
+$project = new class($name, $worker, $scheduler) {
+    public function __construct(private readonly string $name, private readonly bool $worker, private readonly bool $scheduler) {}
 
     public function name(): string
     {
@@ -81,9 +87,21 @@ $project = new class($name, $worker) {
         return $this->worker ? ['default' => new stdClass()] : [];
     }
 
+    public function cron(): array
+    {
+        return $this->scheduler ? ['sample' => new class {
+            public function frequency(): string { return '* * * * *'; }
+            public function command(): string { return SCHEDULER_COMMAND; }
+        }] : [];
+    }
+
     public function hasSection(string $section): bool
     {
-        return $section === 'queues' && $this->worker;
+        return match ($section) {
+            'queues' => $this->worker,
+            'cron' => $this->scheduler,
+            default => false,
+        };
     }
 };
 
@@ -224,6 +242,41 @@ try {
             }
             if ($attempt === 12) {
                 throw new RuntimeException('The disposable worker command did not emit its marker.');
+            }
+            sleep(5);
+        }
+    }
+    if ($scheduler) {
+        $box = $client->inspectBoxService($expectedProject, 'scheduler');
+        $scripts = $box['scripts'] ?? null;
+        if (! is_array($scripts)) {
+            throw new RuntimeException('The disposable Box inspection did not include its scripts.');
+        }
+        $registered = false;
+        foreach ($scripts as $script) {
+            if (is_array($script) && ($script['name'] ?? null) === 'sample'
+                && ($script['schedule'] ?? null) === '* * * * *'
+                && ($script['enabled'] ?? false) === true
+                && ($script['content'] ?? null) === SCHEDULER_COMMAND) {
+                $registered = true;
+                break;
+            }
+        }
+        if (! $registered) {
+            throw new RuntimeException('The disposable Box did not report the configured scheduled script.');
+        }
+        echo "EasyPanel disposable Box script registration verified.\n";
+        for ($attempt = 1; $attempt <= 18; $attempt++) {
+            $logs = $client->queryServiceLogs($expectedProject, 'scheduler', ['limit' => 30]);
+            foreach ($logs as $record) {
+                $message = $record['message'] ?? $record['line'] ?? $record['text'] ?? null;
+                if (is_string($message) && str_contains($message, 'ShipperCLI scheduled fixture executed')) {
+                    echo "EasyPanel disposable scheduled command execution verified.\n";
+                    break 2;
+                }
+            }
+            if ($attempt === 18) {
+                throw new RuntimeException('The scheduled command did not emit its expected log output.');
             }
             sleep(5);
         }

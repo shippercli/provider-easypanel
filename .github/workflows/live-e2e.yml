@@ -16,6 +16,10 @@ on:
         description: Exercise a disposable queue worker from the provider checkout
         type: boolean
         default: false
+      scheduler:
+        description: Exercise scheduled Box scripts with the public Git fixture
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -40,7 +44,8 @@ jobs:
        (github.event_name == 'workflow_dispatch' &&
         (github.ref == 'refs/heads/audit/2026-10-14-fixes' ||
          github.ref == 'refs/heads/codex/easypanel-public-git' ||
-         github.ref == 'refs/heads/codex/easypanel-worker-live')))
+         github.ref == 'refs/heads/codex/easypanel-worker-live' ||
+         github.ref == 'refs/heads/codex/easypanel-scheduler-live')))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -55,7 +60,8 @@ jobs:
       - run: composer install --no-interaction --prefer-dist
       - name: Deploy, verify and clean up disposable app
         env:
-          SHIPPER_E2E_SOURCE: ${{ inputs.source || 'image' }}
+          SHIPPER_E2E_SOURCE: ${{ inputs.scheduler && 'git' || inputs.source || 'image' }}
+          SHIPPER_E2E_SCHEDULER: ${{ inputs.scheduler }}
           SHIPPER_E2E_WORKER: ${{ inputs.worker }}
         run: php tests/live-e2e.php
 
