@@ -7,8 +7,10 @@ use ShipperCli\ProviderEasyPanel\EasyPanelProvider;
 
 $shipper = getenv('SHIPPER_E2E_BIN');
 $published = is_string($shipper) && $shipper !== '';
+$worker = ! $published && getenv('SHIPPER_E2E_WORKER') === 'true';
 $sourceType = getenv('SHIPPER_E2E_SOURCE') ?: 'image';
-$expectedBody = match ($sourceType) {
+$expectedBody = match ($worker ? 'worker' : $sourceType) {
+    'worker' => 'ShipperCLI EasyPanel worker fixture web app',
     'git' => 'ShipperCLI EasyPanel public Git fixture',
     'image' => '<title>Welcome to nginx!</title>',
     default => throw new RuntimeException('Unsupported live fixture source.'),
@@ -38,6 +40,19 @@ $source = $sourceType === 'git' ? [
     'type' => 'image',
     'image' => 'nginx:alpine',
 ];
+if ($worker) {
+    $source = [
+        'type' => 'dockerfile',
+        'dockerfile' => <<<'DOCKERFILE'
+FROM php:8.3-cli-alpine
+WORKDIR /app
+RUN printf '%s\n' 'ShipperCLI EasyPanel worker fixture web app' > index.html
+RUN printf '%s\n' '<?php' 'if (array_slice($argv, 1) !== ["queue:work", "database", "--queue=default"]) { exit(1); }' 'while (true) { echo "ShipperCLI EasyPanel worker command executed\n"; sleep(5); }' > artisan
+EXPOSE 80
+CMD ["php", "-S", "0.0.0.0:80"]
+DOCKERFILE,
+    ];
+}
 $client = new EasyPanelClient($url, $token, timeout: 45);
 $provider = new EasyPanelProvider([
     'url' => $url,
@@ -47,8 +62,8 @@ $provider = new EasyPanelProvider([
     'source' => $source,
 ], $client);
 
-$project = new class($name) {
-    public function __construct(private readonly string $name) {}
+$project = new class($name, $worker) {
+    public function __construct(private readonly string $name, private readonly bool $worker) {}
 
     public function name(): string
     {
@@ -59,6 +74,16 @@ $project = new class($name) {
     public function repository(): array
     {
         return [];
+    }
+
+    public function queues(): array
+    {
+        return $this->worker ? ['default' => new stdClass()] : [];
+    }
+
+    public function hasSection(string $section): bool
+    {
+        return $section === 'queues' && $this->worker;
     }
 };
 
@@ -190,6 +215,19 @@ try {
     }
 
     echo "EasyPanel disposable deployment is ready.\n";
+    if ($worker) {
+        for ($attempt = 1; $attempt <= 12; $attempt++) {
+            $logs = $client->queryServiceLogs($expectedProject, 'worker-default', ['limit' => 20]);
+            if (str_contains(json_encode($logs, JSON_THROW_ON_ERROR), 'ShipperCLI EasyPanel worker command executed')) {
+                echo "EasyPanel disposable queue worker command verified.\n";
+                break;
+            }
+            if ($attempt === 12) {
+                throw new RuntimeException('The disposable worker command did not emit its marker.');
+            }
+            sleep(5);
+        }
+    }
     if ($published) {
         $runShipper(['status', $name, '--profile=v1']);
         $runShipper(['logs', $name, '--profile=v1', '--lines=10']);

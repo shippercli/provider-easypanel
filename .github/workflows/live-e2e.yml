@@ -12,6 +12,10 @@ on:
         type: choice
         options: [image, git]
         default: image
+      worker:
+        description: Exercise a disposable queue worker from the provider checkout
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -35,7 +39,8 @@ jobs:
       (github.ref == 'refs/heads/main' ||
        (github.event_name == 'workflow_dispatch' &&
         (github.ref == 'refs/heads/audit/2026-10-14-fixes' ||
-         github.ref == 'refs/heads/codex/easypanel-public-git')))
+         github.ref == 'refs/heads/codex/easypanel-public-git' ||
+         github.ref == 'refs/heads/codex/easypanel-worker-live')))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -51,11 +56,12 @@ jobs:
       - name: Deploy, verify and clean up disposable app
         env:
           SHIPPER_E2E_SOURCE: ${{ inputs.source || 'image' }}
+          SHIPPER_E2E_WORKER: ${{ inputs.worker }}
         run: php tests/live-e2e.php
 
   published-lifecycle:
     if: >-
-      github.event_name == 'workflow_dispatch' && inputs.published &&
+      github.event_name == 'workflow_dispatch' && inputs.published && !inputs.worker &&
       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/easypanel-patch-smoke')
     runs-on: ubuntu-latest
     timeout-minutes: 12
