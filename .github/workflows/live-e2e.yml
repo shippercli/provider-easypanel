@@ -2,6 +2,11 @@ name: EasyPanel Live E2E
 
 on:
   workflow_dispatch:
+    inputs:
+      published:
+        description: Exercise the published Composer and Action install paths
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -20,7 +25,10 @@ concurrency:
 
 jobs:
   disposable-lifecycle:
-    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/audit/2026-10-14-fixes')
+    if: >-
+      inputs.published != true &&
+      (github.ref == 'refs/heads/main' ||
+       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/audit/2026-10-14-fixes'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -35,3 +43,74 @@ jobs:
       - run: composer install --no-interaction --prefer-dist
       - name: Deploy, verify and clean up disposable app
         run: php tests/live-e2e.php
+
+  published-lifecycle:
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.published &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/easypanel-published-smoke')
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        installation: [composer, action]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Prepare the disposable project configuration
+        run: |
+          name="e$(openssl rand -hex 6)"
+          echo "SHIPPER_E2E_PROJECT=$name" >> "$GITHUB_ENV"
+          mkdir published-fixture
+          cat > published-fixture/shipper.yml <<'YAML'
+          providers:
+            easypanel:
+              url: "${EASYPANEL_URL}"
+              auth_token: "${EASYPANEL_AUTH_TOKEN}"
+              managed_prefix: "s-"
+              service_name: "web"
+              source:
+                type: image
+                image: "nginx:alpine"
+          projects:
+          YAML
+          cat >> published-fixture/shipper.yml <<YAML
+            $name:
+              provider: easypanel
+              profiles:
+                v1:
+                  branch: main
+          YAML
+      - uses: shivammathur/setup-php@v2
+        if: matrix.installation == 'composer'
+        with:
+          php-version: '8.3'
+          tools: composer:v2
+          coverage: none
+      - name: Install Shipper through Composer
+        if: matrix.installation == 'composer'
+        env:
+          COMPOSER_HOME: ${{ runner.temp }}/shipper-composer
+        run: |
+          composer global require --no-interaction --prefer-dist shippercli/cli:1.0.4 shippercli/provider-easypanel:2.0.0
+          echo "$COMPOSER_HOME/vendor/bin" >> "$GITHUB_PATH"
+      - name: Install and validate through the published Shipper Action
+        if: matrix.installation == 'action'
+        uses: shippercli/actions/.github/actions/shipper@2649f5132e10d405dddd77198e42c67035cfff4c
+        env:
+          EASYPANEL_URL: ${{ secrets.EASYPANEL_URL }}
+          EASYPANEL_AUTH_TOKEN: ${{ secrets.EASYPANEL_AUTH_TOKEN }}
+        with:
+          command: validate
+          cli-version: '1.0.4'
+          providers: shippercli/provider-easypanel:2.0.0
+          working-directory: published-fixture
+      - name: Verify published deployment, HTTPS, and cleanup
+        working-directory: published-fixture
+        env:
+          EASYPANEL_URL: ${{ secrets.EASYPANEL_URL }}
+          EASYPANEL_AUTH_TOKEN: ${{ secrets.EASYPANEL_AUTH_TOKEN }}
+        run: |
+          export SHIPPER_E2E_BIN="$(command -v shipper)"
+          test -x "$SHIPPER_E2E_BIN"
+          php ../tests/live-e2e.php

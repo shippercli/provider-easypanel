@@ -5,7 +5,9 @@ declare(strict_types=1);
 use ShipperCli\ProviderEasyPanel\EasyPanelClient;
 use ShipperCli\ProviderEasyPanel\EasyPanelProvider;
 
-require dirname(__DIR__).'/vendor/autoload.php';
+$shipper = getenv('SHIPPER_E2E_BIN');
+$published = is_string($shipper) && $shipper !== '';
+require $published ? dirname($shipper, 2).'/autoload.php' : dirname(__DIR__).'/vendor/autoload.php';
 
 $url = getenv('EASYPANEL_URL');
 $token = getenv('EASYPANEL_AUTH_TOKEN');
@@ -14,7 +16,10 @@ if (! is_string($url) || $url === '' || ! is_string($token) || $token === '') {
     throw new RuntimeException('EASYPANEL_URL and EASYPANEL_AUTH_TOKEN are required.');
 }
 
-$name = 'e'.bin2hex(random_bytes(6));
+$name = $published ? getenv('SHIPPER_E2E_PROJECT') : 'e'.bin2hex(random_bytes(6));
+if (! is_string($name) || ! preg_match('/\Ae[a-f0-9]{12}\z/', $name)) {
+    throw new RuntimeException('Invalid disposable project identity.');
+}
 $prefix = 's-';
 $expectedProject = $prefix.$name.'-v1-'.substr(hash('sha256', json_encode([$name, 'v1'], JSON_THROW_ON_ERROR)), 0, 20);
 $expectedService = 'web';
@@ -62,6 +67,24 @@ $profile = new class {
     }
 };
 
+$runShipper = static function (array $arguments) use ($shipper): void {
+    $process = proc_open([$shipper, ...$arguments], [STDIN, STDOUT, STDERR], $pipes);
+    if (! is_resource($process) || proc_close($process) !== 0) {
+        throw new RuntimeException('Published Shipper command failed: '.$arguments[0]);
+    }
+};
+if ($published) {
+    foreach (['shippercli/cli' => '1.0.4', 'shippercli/provider-easypanel' => '2.0.0'] as $package => $version) {
+        $installed = Composer\InstalledVersions::getPrettyVersion($package);
+        if (! is_string($installed) || ltrim($installed, 'v') !== $version) {
+            throw new RuntimeException('Unexpected published version for '.$package);
+        }
+        echo $package.' '.$installed.' '.Composer\InstalledVersions::getReference($package).PHP_EOL;
+    }
+    $runShipper(['validate']);
+    $runShipper(['plan', $name, '--profile=v1']);
+}
+
 $projectExists = static fn (): bool => in_array(
     $expectedProject,
     array_column($client->listProjectsAndServices()['projects'], 'name'),
@@ -73,7 +96,9 @@ if ($projectExists()) {
 echo "Disposable lifecycle project: {$expectedProject}\n";
 
 try {
-    if (! $provider->apply($project, $profile)) {
+    if ($published) {
+        $runShipper(['apply', $name, '--profile=v1', '--force']);
+    } elseif (! $provider->apply($project, $profile)) {
         throw new RuntimeException($provider->getLastError());
     }
 
@@ -150,9 +175,18 @@ try {
     }
 
     echo "EasyPanel disposable deployment is ready.\n";
+    if ($published) {
+        $runShipper(['status', $name, '--profile=v1']);
+        $runShipper(['logs', $name, '--profile=v1', '--lines=10']);
+    }
 } finally {
-    if (! $provider->destroy($project, $profile) || $projectExists()) {
+    if ($published) {
+        $runShipper(['destroy', $name, '--profile=v1', '--force']);
+    } elseif (! $provider->destroy($project, $profile)) {
         throw new RuntimeException('Disposable lifecycle cleanup failed: '.$provider->getLastError());
+    }
+    if ($projectExists()) {
+        throw new RuntimeException('The disposable project is still present after cleanup.');
     }
     echo "Disposable lifecycle project cleanup verified.\n";
 }
