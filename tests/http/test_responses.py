@@ -64,11 +64,13 @@ class ResponsesTest(unittest.TestCase):
                         if kind == 'database': data['env'] += '\nSHIPPERCLI_DATABASE_CREATED=24278f6ee6dcd2d8144ee46f'
                         if state == 'malformed': data['env'] += '\nBROKEN="unfinished'
                     elif procedure.endswith('.destroyService'): data = None
-                    elif state == 'unreadable': data = None
+                    elif state in {'unreadable', 'empty-ack-unreadable'}: data = None
                     else:
-                        services = [] if state == 'absent' else [{'projectName': 'fixture', 'name': names[kind], 'type': 'redis' if state == 'replaced' else types[kind]}]
+                        services = [] if state in {'absent', 'empty-ack-absent'} else [{'projectName': 'fixture', 'name': names[kind], 'type': 'redis' if state == 'replaced' else types[kind]}]
                         data = {'projects': [{'name': 'fixture'}], 'services': services}
                     status, payload = 200, json.dumps({'json': data}).encode()
+                    if state.startswith('empty-ack-') and procedure.endswith('.destroyService'):
+                        payload = b'{}'
                 elif self.path.startswith('/domain-ack/'):
                     case = self.path.split('/')[2]
                     status, payload = 200, b'{}'
@@ -213,7 +215,7 @@ class ResponsesTest(unittest.TestCase):
                     self.assertTrue(path.endswith('/api/createAppService'))
                     self.assertEqual(auth, 'Bearer synthetic-authorization-secret')
                     self.assertEqual(json.loads(body), {'projectName': 'fixture', 'serviceName': 'web', 'env': 'SHIPPERCLI_MANAGED=1'})
-                self.assertEqual(len(received), 283)
+                self.assertEqual(len(received), 292)
                 runtime_requests = [(path, auth) for path, auth, _ in received if '/getDockerContainers?' in path]
                 self.assertEqual(len(runtime_requests), 7)
                 self.assertTrue(all(auth == 'Bearer synthetic-authorization-secret' for _, auth in runtime_requests))

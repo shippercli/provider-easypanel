@@ -822,7 +822,17 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             $inspected = $client->inspectDatabaseService($type, $projectName, $serviceName);
             $env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
             if ($this->databaseCreatedMarkerMatches($env, $projectName, $serviceName)) {
-                $client->destroyDatabaseService($type, $projectName, $serviceName);
+                try {
+                    $client->destroyDatabaseService($type, $projectName, $serviceName);
+                } catch (\RuntimeException $exception) {
+                    // The deletion may have succeeded even if the acknowledgement was invalid.
+                    $remaining = $client->listProjectsAndServices();
+                    if ($this->findService($remaining, $projectName, $serviceName) !== null) {
+                        throw $exception;
+                    }
+
+                    continue;
+                }
                 $this->assertServiceAbsent($client, $projectName, $serviceName);
             }
         }
