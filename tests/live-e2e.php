@@ -108,7 +108,24 @@ try {
     }
 
     $domainHost = null;
-    foreach ($client->listDomains($expectedProject, $expectedService) as $domain) {
+    $domains = $client->listDomains($expectedProject, $expectedService);
+    if ($disposable) {
+        fwrite(STDERR, 'Disposable domain inventory count: '.count($domains).PHP_EOL);
+    }
+
+    foreach ($domains as $domain) {
+        if ($disposable) {
+            $destination = $domain['serviceDestination'] ?? null;
+            fwrite(STDERR, 'Disposable domain binding: '.json_encode([
+                'https_type' => gettype($domain['https'] ?? null),
+                'https_enabled' => ($domain['https'] ?? false) === true,
+                'service_destination' => ($domain['destinationType'] ?? null) === 'service',
+                'destination_type' => gettype($destination),
+                'project_matches' => ($destination['projectName'] ?? null) === $expectedProject,
+                'service_matches' => ($destination['serviceName'] ?? null) === $expectedService,
+            ], JSON_THROW_ON_ERROR).PHP_EOL);
+        }
+
         if (
             ($domain['https'] ?? false) === true
             && ($domain['destinationType'] ?? null) === 'service'
