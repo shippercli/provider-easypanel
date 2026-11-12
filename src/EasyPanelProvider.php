@@ -401,6 +401,9 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
 
             $service = $this->findService($inventory, $projectName, $serviceName);
             if ($service === null) {
+                if ($this->booleanConfig('destroy_project', true) && ! $this->projectHasServices($inventory, $projectName)) {
+                    throw new \RuntimeException('The empty EasyPanel project is still present and has no app ownership markers. Verify its ownership and remove it in EasyPanel if appropriate.');
+                }
                 return true;
             }
 

@@ -281,7 +281,9 @@ flow. If project cleanup is enabled and no services remain, a second fresh read
 must show the project absent after its deletion request. Other services are
 preserved and prevent project deletion. Each verification makes one observation
 and sends no repeated delete; asynchronous work may return an unconfirmed result
-requiring a status check before retry. This proves observed API inventory
+requiring a status check before retry. If a retry finds an empty project and no
+app ownership markers, Shipper reports incomplete cleanup. Verify ownership in
+EasyPanel before removing the empty project there. This proves observed API inventory
 absence, not physical erasure, worker/database completion, or transactional
 cleanup. Live account verification remains required.
 
