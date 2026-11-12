@@ -33,7 +33,7 @@ foreach (['matching', 'different', 'unrelated'] as $case) {
     $failed = false;
     try {
         if ($case === 'unrelated') {
-            $api->call('services.app.deployService');
+            $api->call('services.app.updateSourceGit');
         } else {
             $api->updateImageSource('fixture', 'web', 'nginx:alpine');
         }
