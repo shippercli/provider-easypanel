@@ -86,12 +86,15 @@ $runShipper = static function (array $arguments) use ($shipper): void {
     }
 };
 if ($published) {
-    foreach (['shippercli/cli' => '1.0.4', 'shippercli/provider-easypanel' => '2.0.0'] as $package => $version) {
+    foreach (['shippercli/cli' => '1.0.4', 'shippercli/provider-easypanel' => '2.0.1'] as $package => $version) {
         $installed = Composer\InstalledVersions::getPrettyVersion($package);
         if (! is_string($installed) || ltrim($installed, 'v') !== $version) {
             throw new RuntimeException('Unexpected published version for '.$package);
         }
         echo $package.' '.$installed.' '.Composer\InstalledVersions::getReference($package).PHP_EOL;
+    }
+    if (Composer\InstalledVersions::getReference('shippercli/provider-easypanel') !== 'aab02e776f17fa371382f1e4afd21f8239322ec5') {
+        throw new RuntimeException('Unexpected published EasyPanel source reference.');
     }
     $runShipper(['validate']);
     $runShipper(['plan', $name, '--profile=v1']);
