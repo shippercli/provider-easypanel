@@ -79,12 +79,27 @@ final class EasyPanelClient
         $this->call('projects.destroyProject', ['name' => $projectName]);
     }
 
-    public function createAppService(string $projectName, string $serviceName): void
+    public function createAppService(string $projectName, string $serviceName, ?string $environment = null): void
     {
-        $this->call('services.app.createService', [
+        $input = [
             'projectName' => $projectName,
             'serviceName' => $serviceName,
-        ]);
+        ];
+        if ($environment === null) {
+            $this->call('services.app.createService', $input);
+            return;
+        }
+
+        $input['env'] = $environment;
+        if ($this->transport !== null) {
+            ($this->transport)('createAppService', $input);
+            return;
+        }
+
+        $response = $this->post('/api/createAppService', 'Bearer '.$this->authToken, $input);
+        if (\trim($response) !== 'null') {
+            throw new \RuntimeException('EasyPanel app creation returned an unexpected response. Recheck inventory before retrying.');
+        }
     }
 
     public function createBoxService(string $projectName, string $serviceName): void
@@ -353,12 +368,20 @@ final class EasyPanelClient
             return ($this->transport)($procedure, $input);
         }
 
+        $response = $this->post('/api/trpc/'.$procedure, $this->authToken, ['json' => (object) $input]);
+
+        return $this->decodeResponse($response, $procedure);
+    }
+
+    /** @param array<string, mixed> $input */
+    private function post(string $path, #[\SensitiveParameter] string $authorization, #[\SensitiveParameter] array $input): string
+    {
         if (! \function_exists('curl_init')) {
             throw new \RuntimeException('The EasyPanel provider requires the PHP cURL extension.');
         }
 
-        $payload = \json_encode(['json' => (object) $input], JSON_THROW_ON_ERROR);
-        $handle = \curl_init(\rtrim($this->baseUrl, '/').'/api/trpc/'.$procedure);
+        $payload = \json_encode($input, JSON_THROW_ON_ERROR);
+        $handle = \curl_init(\rtrim($this->baseUrl, '/').$path);
         if ($handle === false) {
             throw new \RuntimeException('Unable to initialize the EasyPanel API request.');
         }
@@ -368,7 +391,7 @@ final class EasyPanelClient
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_HTTPHEADER => [
-                'Authorization: '.$this->authToken,
+                'Authorization: '.$authorization,
                 'Content-Type: application/json',
             ],
             CURLOPT_POSTFIELDS => $payload,
@@ -390,7 +413,7 @@ final class EasyPanelClient
             throw new \RuntimeException('EasyPanel API request failed (HTTP '.$status.').');
         }
 
-        return $this->decodeResponse($response, $procedure);
+        return $response;
     }
 
     /** @return array<string, mixed> */

@@ -57,7 +57,7 @@ final class PlanResourcePrerequisitesTest extends TestCase
             self::assertCount(1, $plan['actions']);
             self::assertStringStartsWith('BLOCKED:', $plan['actions'][0]);
             self::assertNotContains('projects.createProject', $calls);
-            self::assertNotContains('services.app.createService', $calls);
+            self::assertNotContains('createAppService', $calls);
             self::assertNotContains('services.mysql.createService', $calls);
             self::assertNotContains('services.app.updateEnv', $calls);
         }

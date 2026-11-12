@@ -151,15 +151,18 @@ final class EasyPanelProviderTest extends TestCase
         self::assertSame('services.app.inspectService', $calls[1][0]);
     }
 
-    public function test_apply_creates_and_deploys_only_the_derived_managed_resources(): void
+    #[\PHPUnit\Framework\Attributes\TestWith([true])]
+    #[\PHPUnit\Framework\Attributes\TestWith([false])]
+    public function test_apply_creates_and_deploys_only_the_derived_managed_resources(bool $persistsOwnership): void
     {
         $calls = [];
         $savedEnvironments = [];
         $client = new EasyPanelClient(
             'https://panel.example.com',
             'token',
-            transport: static function (string $procedure, array $input) use (&$savedEnvironments, &$calls): mixed {
+            transport: static function (string $procedure, array $input) use (&$savedEnvironments, &$calls, $persistsOwnership): mixed {
                 $calls[] = [$procedure, $input];
+                if ($procedure === 'createAppService') $savedEnvironments[$input['serviceName']] = $persistsOwnership ? $input['env'] : '';
                 if ($procedure === 'services.app.updateEnv') $savedEnvironments[$input['serviceName']] = $input['env'];
                 if ($procedure === 'services.app.inspectService' && array_key_exists($input['serviceName'], $savedEnvironments)) return ['env' => $savedEnvironments[$input['serviceName']]];
 
@@ -172,11 +175,16 @@ final class EasyPanelProviderTest extends TestCase
         );
         $provider = new EasyPanelProvider($this->config(), $client);
 
-        self::assertTrue($provider->apply($this->project(), $this->profile()));
+        self::assertSame($persistsOwnership, $provider->apply($this->project(), $this->profile()));
+        if (! $persistsOwnership) {
+            self::assertSame(['projects.listProjectsAndServices', 'projects.createProject', 'createAppService', 'services.app.inspectService'], \array_column($calls, 0));
+            return;
+        }
         self::assertSame([
             'projects.listProjectsAndServices',
             'projects.createProject',
-            'services.app.createService',
+            'createAppService',
+            'services.app.inspectService',
             'services.app.updateSourceImage',
             'services.app.updateEnv',
             'services.app.inspectService',
@@ -188,9 +196,10 @@ final class EasyPanelProviderTest extends TestCase
         ], \array_column($calls, 0));
         self::assertSame('shippercli-demo-provider-v1-811454f76c57a1580028', $calls[1][1]['name']);
         self::assertSame('shippercli-demo-provider-v1-811454f76c57a1580028', $calls[2][1]['projectName']);
-        self::assertStringContainsString('SHIPPERCLI_MANAGED=1', $calls[4][1]['env']);
-        self::assertStringContainsString('SHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028', $calls[4][1]['env']);
-        self::assertSame('demo.shippercli.com', $calls[9][1]['host']);
+        self::assertSame("SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028", $calls[2][1]['env']);
+        self::assertStringContainsString('SHIPPERCLI_MANAGED=1', $calls[5][1]['env']);
+        self::assertStringContainsString('SHIPPERCLI_MANAGED_PROJECT=shippercli-demo-provider-v1-811454f76c57a1580028', $calls[5][1]['env']);
+        self::assertSame('demo.shippercli.com', $calls[10][1]['host']);
     }
 
     public function test_apply_removes_an_owned_worker_removed_from_configuration(): void
