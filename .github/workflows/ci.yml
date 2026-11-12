@@ -32,5 +32,13 @@ jobs:
         run: composer dump-autoload --optimize --strict-psr
       - name: Run tests
         run: composer test
+      - name: Verify provider distribution archives
+        run: python3 tests/package/verify-dist.py
       - name: Audit dependencies
         run: composer audit --locked --no-interaction
+      - name: Verify real HTTP response boundaries
+        run: python3 tests/http/test_responses.py
+      - name: Verify application environment readback over HTTP
+        run: python3 tests/http/test_environment_readback.py
+      - name: Verify worker and scheduler environment readback over HTTP
+        run: python3 tests/http/test_workload_readback.py

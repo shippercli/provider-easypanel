@@ -14,13 +14,15 @@ if (! is_string($url) || $url === '' || ! is_string($token) || $token === '') {
     throw new RuntimeException('EASYPANEL_URL and EASYPANEL_AUTH_TOKEN are required.');
 }
 
-$expectedProject = 'shippercli-demo-provider-v1';
+$name = 'e'.bin2hex(random_bytes(6));
+$prefix = 's-';
+$expectedProject = $prefix.$name.'-v1-'.substr(hash('sha256', json_encode([$name, 'v1'], JSON_THROW_ON_ERROR)), 0, 20);
 $expectedService = 'web';
 $client = new EasyPanelClient($url, $token, timeout: 45);
 $provider = new EasyPanelProvider([
     'url' => $url,
     'auth_token' => $token,
-    'managed_prefix' => 'shippercli-demo-',
+    'managed_prefix' => $prefix,
     'service_name' => $expectedService,
     'source' => [
         'type' => 'image',
@@ -28,10 +30,12 @@ $provider = new EasyPanelProvider([
     ],
 ], $client);
 
-$project = new class {
+$project = new class($name) {
+    public function __construct(private readonly string $name) {}
+
     public function name(): string
     {
-        return 'provider';
+        return $this->name;
     }
 
     /** @return array<string, string> */
@@ -58,81 +62,97 @@ $profile = new class {
     }
 };
 
-if (! $provider->apply($project, $profile)) {
-    throw new RuntimeException($provider->getLastError());
+$projectExists = static fn (): bool => in_array(
+    $expectedProject,
+    array_column($client->listProjectsAndServices()['projects'], 'name'),
+    true,
+);
+if ($projectExists()) {
+    throw new RuntimeException('Disposable project name is already in use.');
 }
+echo "Disposable lifecycle project: {$expectedProject}\n";
 
-$inventory = $client->listProjectsAndServices();
-$serviceFound = false;
-foreach ($inventory['services'] as $service) {
+try {
+    if (! $provider->apply($project, $profile)) {
+        throw new RuntimeException($provider->getLastError());
+    }
+
+    $inventory = $client->listProjectsAndServices();
+    $serviceFound = false;
+    foreach ($inventory['services'] as $service) {
+        if (
+            ($service['projectName'] ?? null) === $expectedProject
+            && ($service['name'] ?? null) === $expectedService
+            && ($service['type'] ?? null) === 'app'
+        ) {
+            $serviceFound = true;
+            break;
+        }
+    }
+
+    if (! $serviceFound) {
+        throw new RuntimeException('The exact Shipper disposable service was not found after apply.');
+    }
+
+    $inspected = $client->inspectAppService($expectedProject, $expectedService);
+    $env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
     if (
-        ($service['projectName'] ?? null) === $expectedProject
-        && ($service['name'] ?? null) === $expectedService
-        && ($service['type'] ?? null) === 'app'
+        ! in_array('SHIPPERCLI_MANAGED=1', preg_split('/\R/', $env) ?: [], true)
+        || ! in_array('SHIPPERCLI_MANAGED_PROJECT='.$expectedProject, preg_split('/\R/', $env) ?: [], true)
     ) {
-        $serviceFound = true;
-        break;
-    }
-}
-
-if (! $serviceFound) {
-    throw new RuntimeException('The exact Shipper demo service was not found after apply.');
-}
-
-$inspected = $client->inspectAppService($expectedProject, $expectedService);
-$env = is_string($inspected['env'] ?? null) ? $inspected['env'] : '';
-if (
-    ! in_array('SHIPPERCLI_MANAGED=1', preg_split('/\R/', $env) ?: [], true)
-    || ! in_array('SHIPPERCLI_MANAGED_PROJECT='.$expectedProject, preg_split('/\R/', $env) ?: [], true)
-) {
-    throw new RuntimeException('The Shipper ownership markers were not applied to the demo service.');
-}
-
-$domainHost = null;
-foreach ($client->listDomains($expectedProject, $expectedService) as $domain) {
-    if (
-        ($domain['https'] ?? false) === true
-        && ($domain['destinationType'] ?? null) === 'service'
-        && ($domain['serviceDestination']['projectName'] ?? null) === $expectedProject
-        && ($domain['serviceDestination']['serviceName'] ?? null) === $expectedService
-        && is_string($domain['host'] ?? null)
-    ) {
-        $domainHost = $domain['host'];
-        break;
-    }
-}
-
-if ($domainHost === null) {
-    throw new RuntimeException('The Shipper demo service has no generated HTTPS domain.');
-}
-
-$ready = false;
-for ($attempt = 1; $attempt <= 18; $attempt++) {
-    $handle = curl_init('https://'.$domainHost.'/');
-    if ($handle === false) {
-        throw new RuntimeException('Unable to initialize the demo readiness request.');
+        throw new RuntimeException('The Shipper ownership markers were not applied to the disposable service.');
     }
 
-    curl_setopt_array($handle, [
-        CURLOPT_NOBODY => true,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 15,
-        CURLOPT_FOLLOWLOCATION => true,
-    ]);
-    curl_exec($handle);
-    $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
-    unset($handle);
-
-    if ($status >= 200 && $status < 400) {
-        $ready = true;
-        break;
+    $domainHost = null;
+    foreach ($client->listDomains($expectedProject, $expectedService) as $domain) {
+        if (
+            ($domain['https'] ?? false) === true
+            && ($domain['destinationType'] ?? null) === 'service'
+            && ($domain['serviceDestination']['projectName'] ?? null) === $expectedProject
+            && ($domain['serviceDestination']['serviceName'] ?? null) === $expectedService
+            && is_string($domain['host'] ?? null)
+        ) {
+            $domainHost = $domain['host'];
+            break;
+        }
     }
 
-    sleep(5);
-}
+    if ($domainHost === null) {
+        throw new RuntimeException('The Shipper disposable service has no generated HTTPS domain.');
+    }
 
-if (! $ready) {
-    throw new RuntimeException('The Shipper demo service did not become ready.');
-}
+    $ready = false;
+    for ($attempt = 1; $attempt <= 18; $attempt++) {
+        $handle = curl_init('https://'.$domainHost.'/');
+        if ($handle === false) {
+            throw new RuntimeException('Unable to initialize the disposable readiness request.');
+        }
 
-echo "EasyPanel demo deployment is ready.\n";
+        curl_setopt_array($handle, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 15,
+            CURLOPT_PROTOCOLS_STR => 'HTTPS',
+        ]);
+        $body = curl_exec($handle);
+        $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+        unset($handle);
+
+        if ($status === 200 && is_string($body) && str_contains($body, '<title>Welcome to nginx!</title>')) {
+            $ready = true;
+            break;
+        }
+
+        sleep(5);
+    }
+
+    if (! $ready) {
+        throw new RuntimeException('The Shipper disposable service did not become ready.');
+    }
+
+    echo "EasyPanel disposable deployment is ready.\n";
+} finally {
+    if (! $provider->destroy($project, $profile) || $projectExists()) {
+        throw new RuntimeException('Disposable lifecycle cleanup failed: '.$provider->getLastError());
+    }
+    echo "Disposable lifecycle project cleanup verified.\n";
+}

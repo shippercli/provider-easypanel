@@ -36,9 +36,36 @@ final class EasyPanelClient
     {
         $data = $this->call('projects.listProjectsAndServices');
 
+        if (! \is_array($data) || ! \is_array($data['projects'] ?? null) || ! \array_is_list($data['projects'])
+            || ! \is_array($data['services'] ?? null) || ! \array_is_list($data['services'])) {
+            throw new \RuntimeException('EasyPanel returned an invalid project/service inventory.');
+        }
+        $projects = [];
+        $services = [];
+        foreach ($data['projects'] as $project) {
+            if (! \is_array($project) || ! \is_string($project['name'] ?? null) || $project['name'] === ''
+                || \trim($project['name']) !== $project['name'] || isset($projects[$project['name']])) {
+                throw new \RuntimeException('EasyPanel returned an invalid project inventory entry.');
+            }
+            $projects[$project['name']] = true;
+        }
+        foreach ($data['services'] as $service) {
+            foreach (['projectName', 'name', 'type'] as $key) {
+                if (! \is_array($service) || ! \is_string($service[$key] ?? null) || $service[$key] === ''
+                    || \trim($service[$key]) !== $service[$key]) {
+                    throw new \RuntimeException('EasyPanel returned an invalid service inventory entry.');
+                }
+            }
+            $identity = \json_encode([$service['projectName'], $service['name']], JSON_THROW_ON_ERROR);
+            if (! isset($projects[$service['projectName']]) || isset($services[$identity])) {
+                throw new \RuntimeException('EasyPanel returned an ambiguous or inconsistent service inventory.');
+            }
+            $services[$identity] = true;
+        }
+
         return [
-            'projects' => \is_array($data) && \is_array($data['projects'] ?? null) ? \array_values($data['projects']) : [],
-            'services' => \is_array($data) && \is_array($data['services'] ?? null) ? \array_values($data['services']) : [],
+            'projects' => $data['projects'],
+            'services' => $data['services'],
         ];
     }
 
@@ -49,15 +76,28 @@ final class EasyPanelClient
 
     public function destroyProject(string $projectName): void
     {
-        $this->call('projects.destroyProject', ['projectName' => $projectName]);
+        $this->call('projects.destroyProject', ['name' => $projectName]);
     }
 
-    public function createAppService(string $projectName, string $serviceName): void
+    public function createAppService(string $projectName, string $serviceName, ?string $environment = null): void
     {
-        $this->call('services.app.createService', [
+        $input = [
             'projectName' => $projectName,
             'serviceName' => $serviceName,
-        ]);
+        ];
+        if ($environment === null) {
+            $this->call('services.app.createService', $input);
+            return;
+        }
+
+        $input['env'] = $environment;
+        if ($this->transport !== null) {
+            ($this->transport)('createAppService', $input);
+            return;
+        }
+
+        // The provider verifies the newly created app and its ownership through inspection.
+        $this->post('/api/createAppService', 'Bearer '.$this->authToken, $input);
     }
 
     public function createBoxService(string $projectName, string $serviceName): void
@@ -114,7 +154,7 @@ final class EasyPanelClient
             'serviceName' => $serviceName,
         ]);
 
-        return is_array($data) ? $data : [];
+        return $this->inspectionData($data, $projectName, $serviceName, 'box');
     }
 
     public function destroyBoxService(string $projectName, string $serviceName): void
@@ -129,10 +169,15 @@ final class EasyPanelClient
     public function createDatabaseService(string $type, string $projectName, string $serviceName, array $payload = []): void
     {
         $type = $this->databaseType($type);
+        foreach (['projectName' => $projectName, 'serviceName' => $serviceName] as $key => $expected) {
+            if (\array_key_exists($key, $payload) && $payload[$key] !== $expected) {
+                throw new \InvalidArgumentException('EasyPanel database payload must not override the target identity.');
+            }
+        }
         $this->call('services.'.$type.'.createService', [
+            ...$payload,
             'projectName' => $projectName,
             'serviceName' => $serviceName,
-            ...$payload,
         ]);
     }
 
@@ -145,7 +190,7 @@ final class EasyPanelClient
             'serviceName' => $serviceName,
         ]);
 
-        return is_array($data) ? $data : [];
+        return $this->inspectionData($data, $projectName, $serviceName, $type);
     }
 
     public function destroyDatabaseService(string $type, string $projectName, string $serviceName): void
@@ -165,16 +210,23 @@ final class EasyPanelClient
             'serviceName' => $serviceName,
         ]);
 
-        return \is_array($data) ? $data : [];
+        return $this->inspectionData($data, $projectName, $serviceName, 'app');
     }
 
     public function updateImageSource(string $projectName, string $serviceName, string $image): void
     {
-        $this->call('services.app.updateSourceImage', [
+        $result = $this->call('services.app.updateSourceImage', [
             'projectName' => $projectName,
             'serviceName' => $serviceName,
             'image' => $image,
         ]);
+        if ($result instanceof \stdClass && (array) $result === []) {
+            $inspection = $this->inspectAppService($projectName, $serviceName);
+            $savedImage = $inspection['source']['image'] ?? $inspection['image'] ?? null;
+            if ($savedImage !== $image) {
+                throw new \RuntimeException('EasyPanel image source update could not be verified.');
+            }
+        }
     }
 
     public function updateGitSource(string $projectName, string $serviceName, string $repo, string $ref, string $path): void
@@ -208,11 +260,18 @@ final class EasyPanelClient
 
     public function updateDockerfileSource(string $projectName, string $serviceName, string $dockerfile): void
     {
-        $this->call('services.app.updateSourceDockerfile', [
+        $result = $this->call('services.app.updateSourceDockerfile', [
             'projectName' => $projectName,
             'serviceName' => $serviceName,
             'dockerfile' => $dockerfile,
         ]);
+        if ($result instanceof \stdClass && (array) $result === []) {
+            $inspection = $this->inspectAppService($projectName, $serviceName);
+            if (($inspection['source']['type'] ?? null) !== 'dockerfile'
+                || ($inspection['source']['dockerfile'] ?? null) !== $dockerfile) {
+                throw new \RuntimeException('EasyPanel Dockerfile source update could not be verified.');
+            }
+        }
     }
 
     public function updateEnvironment(string $projectName, string $serviceName, string $env): void
@@ -232,7 +291,52 @@ final class EasyPanelClient
             'serviceName' => $serviceName,
         ]);
 
-        return \is_array($data) ? \array_values($data) : [];
+        if (! \is_array($data) || ! \array_is_list($data)) {
+            throw new \RuntimeException('EasyPanel returned an invalid domain inventory.');
+        }
+        foreach ($data as $domain) {
+            if (! \is_array($domain) || ! \is_string($domain['host'] ?? null) || $domain['host'] === ''
+                || \trim($domain['host']) !== $domain['host']) {
+                throw new \RuntimeException('EasyPanel returned an invalid domain inventory.');
+            }
+        }
+        return $data;
+    }
+
+    public function serviceBaseDomain(): ?string
+    {
+        try {
+            $settings = $this->transport !== null
+                ? ($this->transport)('getServiceDomain', [])
+                : \json_decode($this->request('/api/getServiceDomain', 'Bearer '.$this->authToken), true, flags: \JSON_THROW_ON_ERROR);
+        } catch (\RuntimeException $exception) {
+            if (\in_array($exception->getCode(), [403, 404], true)) {
+                return null;
+            }
+            throw $exception;
+        }
+
+        if ($settings === null) {
+            return null;
+        }
+        if (! \is_array($settings)) {
+            throw new \RuntimeException('EasyPanel returned invalid service domain settings.');
+        }
+
+        foreach (['customServiceDomain', 'defaultServiceDomain'] as $key) {
+            $domain = $settings[$key] ?? '';
+            if ($domain === '') {
+                continue;
+            }
+            if (! \is_string($domain) || ! \filter_var($domain, \FILTER_VALIDATE_DOMAIN, \FILTER_FLAG_HOSTNAME)
+                || ! \str_contains($domain, '.') || \str_ends_with($domain, '.') || \filter_var($domain, \FILTER_VALIDATE_IP)) {
+                throw new \RuntimeException('EasyPanel returned an invalid service base domain.');
+            }
+
+            return \strtolower($domain);
+        }
+
+        return null;
     }
 
     public function createDomain(
@@ -242,7 +346,7 @@ final class EasyPanelClient
         int $port = 80,
         string $protocol = 'http',
     ): void {
-        $this->call('domains.createDomain', [
+        $response = $this->call('domains.createDomain', [
             'certificateResolver' => '',
             'destinationType' => 'service',
             'host' => $host,
@@ -259,6 +363,34 @@ final class EasyPanelClient
             ],
             'wildcard' => false,
         ]);
+
+        if (! $response instanceof \stdClass || (array) $response !== []) {
+            return;
+        }
+
+        foreach ($this->listDomains($projectName, $serviceName) as $domain) {
+            if (\strcasecmp($domain['host'], $host) === 0
+                && $this->matchesHttpsBinding($domain, $projectName, $serviceName, $port, $protocol)) {
+                return;
+            }
+        }
+
+        throw new \RuntimeException('EasyPanel did not persist the requested HTTPS binding.');
+    }
+
+    /** @param array<string, mixed> $domain */
+    public function matchesHttpsBinding(array $domain, string $projectName, string $serviceName, int $port, string $protocol): bool
+    {
+        $destination = $domain['serviceDestination'] ?? null;
+
+        return ($domain['https'] ?? null) === true
+            && ($domain['destinationType'] ?? null) === 'service'
+            && ($destination['projectName'] ?? null) === $projectName
+            && ($destination['serviceName'] ?? null) === $serviceName
+            && ($domain['path'] ?? null) === '/'
+            && ($destination['path'] ?? null) === '/'
+            && ($destination['protocol'] ?? null) === $protocol
+            && ($destination['port'] ?? null) === $port;
     }
 
     public function deployAppService(string $projectName, string $serviceName): void
@@ -312,67 +444,163 @@ final class EasyPanelClient
             return ($this->transport)($procedure, $input);
         }
 
+        $response = $this->post('/api/trpc/'.$procedure, $this->authToken, ['json' => (object) $input]);
+
+        return $this->decodeResponse($response, $procedure);
+    }
+
+    public function hasRunningAppContainer(string $projectName, string $serviceName): bool
+    {
+        $identity = $projectName.'_'.$serviceName;
+        $query = ['service' => $identity];
+        $containers = $this->transport !== null
+            ? ($this->transport)('getDockerContainers', $query)
+            : \json_decode($this->request('/api/getDockerContainers?'.\http_build_query($query), 'Bearer '.$this->authToken));
+
+        if (! \is_array($containers) || ! \array_is_list($containers)) {
+            return false;
+        }
+
+        foreach ($containers as $container) {
+            if (($container->State ?? null) === 'running'
+                && ($container->Labels->{'com.docker.swarm.service.name'} ?? null) === $identity) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** @param array<string, mixed> $input */
+    private function post(string $path, #[\SensitiveParameter] string $authorization, #[\SensitiveParameter] array $input): string
+    {
+        return $this->request($path, $authorization, $input);
+    }
+
+    /** @param array<string, mixed>|null $input */
+    private function request(string $path, #[\SensitiveParameter] string $authorization, #[\SensitiveParameter] ?array $input = null): string
+    {
         if (! \function_exists('curl_init')) {
             throw new \RuntimeException('The EasyPanel provider requires the PHP cURL extension.');
         }
 
-        $payload = \json_encode(['json' => (object) $input], JSON_THROW_ON_ERROR);
-        $handle = \curl_init(\rtrim($this->baseUrl, '/').'/api/trpc/'.$procedure);
+        $handle = \curl_init(\rtrim($this->baseUrl, '/').$path);
         if ($handle === false) {
             throw new \RuntimeException('Unable to initialize the EasyPanel API request.');
         }
 
-        \curl_setopt_array($handle, [
-            CURLOPT_POST => true,
+        $options = [
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER => [
-                'Authorization: '.$this->authToken,
-                'Content-Type: application/json',
-            ],
-            CURLOPT_POSTFIELDS => $payload,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_HTTPHEADER => ['Authorization: '.$authorization],
             CURLOPT_TIMEOUT => $this->timeout,
             CURLOPT_SSL_VERIFYPEER => $this->verifySsl,
             CURLOPT_SSL_VERIFYHOST => $this->verifySsl ? 2 : 0,
-        ]);
+        ];
+        if ($input !== null) {
+            $options[CURLOPT_POST] = true;
+            $options[CURLOPT_POSTFIELDS] = \json_encode($input, JSON_THROW_ON_ERROR);
+            $options[CURLOPT_HTTPHEADER][] = 'Content-Type: application/json';
+        }
+        \curl_setopt_array($handle, $options);
 
         $response = \curl_exec($handle);
         $status = (int) \curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
-        $curlError = \curl_error($handle);
+        $curlErrorNumber = \curl_errno($handle);
         unset($handle);
 
         if ($response === false) {
-            throw new \RuntimeException('EasyPanel API transport error: '.$curlError);
+            throw new \RuntimeException('EasyPanel API transport error (cURL '.$curlErrorNumber.').');
         }
 
+        if ($status < 200 || $status >= 300) {
+            throw new \RuntimeException('EasyPanel API request failed (HTTP '.$status.').', $status);
+        }
+
+        return $response;
+    }
+
+    /** @return array<string, mixed> */
+    private function inspectionData(mixed $data, string $projectName, string $serviceName, string $type): array
+    {
+        if (! \is_array($data) || ($data !== [] && \array_is_list($data))) {
+            throw new \RuntimeException('EasyPanel returned an invalid service inspection.');
+        }
+        foreach (['projectName' => $projectName, 'serviceName' => $serviceName, 'name' => $serviceName, 'type' => $type] as $key => $expected) {
+            if (\array_key_exists($key, $data) && $data[$key] !== $expected) {
+                throw new \RuntimeException('EasyPanel returned a mismatched service inspection identity.');
+            }
+        }
+        return $data;
+    }
+
+    private function decodeResponse(string $response, string $procedure): mixed
+    {
         try {
-            $decoded = \json_decode($response, true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException $exception) {
-            throw new \RuntimeException('EasyPanel API returned invalid JSON.', 0, $exception);
+            $shape = \json_decode($response, false, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            throw new \RuntimeException('EasyPanel API returned invalid JSON.');
         }
-
-        if (! \is_array($decoded)) {
+        if (! $shape instanceof \stdClass) {
             throw new \RuntimeException('EasyPanel API returned an invalid response.');
         }
-
-        if ($status >= 400) {
-            $message = $decoded['json']['message'] ?? ('HTTP '.$status);
-            $validation = $decoded['json']['data']['zodErrors'] ?? null;
-            if ($validation !== null) {
-                $message .= ': '.\json_encode($validation, JSON_UNESCAPED_SLASHES);
+        // These void mutations can return an empty object on the legacy API.
+        if ((array) $shape === [] && in_array($procedure, [
+            'domains.createDomain',
+            'projects.destroyProject',
+            'services.app.deployService',
+            'services.app.updateSourceImage',
+            'services.app.updateSourceDockerfile',
+            'services.app.updateEnv',
+            'services.app.destroyService',
+        ], true)) {
+            return $shape;
+        }
+        $result = $shape->result ?? null;
+        foreach ([$shape, $result] as $envelope) {
+            if (! $envelope instanceof \stdClass) continue;
+            foreach (['error', 'errors'] as $key) {
+                if (\property_exists($envelope, $key) && ! \in_array($envelope->{$key}, [null, '', [], false], true)) {
+                    throw new \RuntimeException('EasyPanel API reported failure.');
+                }
             }
-
-            throw new \RuntimeException('EasyPanel API request failed: '.$message);
+            if (\property_exists($envelope, 'success') && $envelope->success !== true) {
+                throw new \RuntimeException('EasyPanel API reported failure.');
+            }
         }
-
-        if (\array_key_exists('json', $decoded)) {
-            return $decoded['json'];
+        $direct = \property_exists($shape, 'json');
+        $data = $result instanceof \stdClass ? ($result->data ?? null) : null;
+        $nested = $data instanceof \stdClass && \property_exists($data, 'json');
+        if ($direct === $nested) {
+            throw new \RuntimeException('EasyPanel API returned an invalid response.');
         }
-
-        if (\array_key_exists('json', $decoded['result']['data'] ?? [])) {
-            return $decoded['result']['data']['json'];
+        $payload = $direct ? $shape->json : $data->json;
+        if ($procedure === 'projects.listProjectsAndServices') {
+            if (! $payload instanceof \stdClass || ! \is_array($payload->projects ?? null)
+                || ! \is_array($payload->services ?? null)) {
+                throw new \RuntimeException('EasyPanel returned an invalid project/service inventory.');
+            }
+            foreach ([...$payload->projects, ...$payload->services] as $entry) {
+                if (! $entry instanceof \stdClass) {
+                    throw new \RuntimeException('EasyPanel returned an invalid project/service inventory.');
+                }
+            }
         }
-
-        return null;
+        if ($procedure === 'domains.listDomains') {
+            if (! \is_array($payload)) {
+                throw new \RuntimeException('EasyPanel returned an invalid domain inventory.');
+            }
+            foreach ($payload as $entry) {
+                if (! $entry instanceof \stdClass) {
+                    throw new \RuntimeException('EasyPanel returned an invalid domain inventory.');
+                }
+            }
+        }
+        if (\preg_match('/^services\.(app|box|mysql|mariadb|postgres|mongo|redis)\.inspectService$/D', $procedure) === 1
+            && ! $payload instanceof \stdClass) {
+            throw new \RuntimeException('EasyPanel returned an invalid service inspection.');
+        }
+        return \json_decode(\json_encode($payload, JSON_THROW_ON_ERROR), true, 512, JSON_THROW_ON_ERROR);
     }
 
     private function databaseType(string $type): string
