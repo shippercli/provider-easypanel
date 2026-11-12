@@ -227,3 +227,57 @@ jobs:
           export SHIPPER_E2E_BIN="$(command -v shipper)"
           test -x "$SHIPPER_E2E_BIN"
           php ../tests/live-e2e.php
+
+  recover-disposable-project:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/easypanel-recover-43260636393'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      EASYPANEL_URL: ${{ secrets.EASYPANEL_URL }}
+      EASYPANEL_AUTH_TOKEN: ${{ secrets.EASYPANEL_AUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - name: Recover the Composer fixture from run 43260636393
+        run: |
+          php <<'PHP'
+          <?php
+          require 'src/EasyPanelClient.php';
+
+          $client = new ShipperCli\ProviderEasyPanel\EasyPanelClient(getenv('EASYPANEL_URL'), getenv('EASYPANEL_AUTH_TOKEN'));
+          // The failed run proved this random identity was unused before creating the fixture.
+          $project = 's-ef0ebf308102e-v1-d059c3332f22f16e5b9d';
+          $inventory = $client->listProjectsAndServices();
+          if (! in_array($project, array_column($inventory['projects'], 'name'), true)) {
+              echo "Disposable project already absent.\n";
+              exit(0);
+          }
+          foreach ($inventory['services'] as $service) {
+              if ($service['projectName'] !== $project) {
+                  continue;
+              }
+              if ($service['name'] !== 'web' || $service['type'] !== 'app') {
+                  throw new RuntimeException('Unexpected service in the disposable project.');
+              }
+              $inspection = $client->inspectAppService($project, 'web');
+              $lines = preg_split('/\R/', $inspection['env'] ?? '') ?: [];
+              if (! in_array('SHIPPERCLI_MANAGED=1', $lines, true)
+                  || ! in_array('SHIPPERCLI_MANAGED_PROJECT='.$project, $lines, true)) {
+                  throw new RuntimeException('Disposable app ownership could not be verified.');
+              }
+          }
+          try {
+              $client->destroyProject($project);
+          } catch (RuntimeException $error) {
+              if (in_array($project, array_column($client->listProjectsAndServices()['projects'], 'name'), true)) {
+                  throw $error;
+              }
+          }
+          if (in_array($project, array_column($client->listProjectsAndServices()['projects'], 'name'), true)) {
+              throw new RuntimeException('Disposable project still exists.');
+          }
+          echo "Disposable project removal verified.\n";
+          PHP
