@@ -447,6 +447,8 @@ final class EasyPanelClient
         }
         // These void mutations can return an empty object on the legacy API.
         if ((array) $shape === [] && in_array($procedure, [
+            'projects.destroyProject',
+            'services.app.deployService',
             'services.app.updateSourceImage',
             'services.app.updateEnv',
             'services.app.destroyService',

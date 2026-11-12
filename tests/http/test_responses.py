@@ -81,7 +81,7 @@ class ResponsesTest(unittest.TestCase):
                         if state['app'] and case == 'other-service': services.append({'projectName': project, 'name': 'other', 'type': 'app'})
                         data = None if state['app'] and case == 'unreadable' else {'projects': projects, 'services': services}
                     status, payload = 200, json.dumps({'json': data}).encode()
-                    if procedure == 'services.app.destroyService':
+                    if procedure in ['services.app.destroyService', 'projects.destroyProject']:
                         payload = b'{}'
                 elif self.path.startswith('/database-target/'):
                     status, payload = 200, b'{"json":null}'
