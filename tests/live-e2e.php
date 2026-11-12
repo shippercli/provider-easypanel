@@ -15,6 +15,10 @@ if (! in_array($database, ['none', 'mariadb', 'postgres', 'mongo', 'redis'], tru
 }
 $withDatabase = $database !== 'none';
 $sourceType = getenv('SHIPPER_E2E_SOURCE') ?: 'image';
+$retry = getenv('SHIPPER_E2E_RETRY') === 'true';
+if ($retry && ($published || $worker || $scheduler || $withDatabase || $sourceType !== 'image')) {
+    throw new RuntimeException('The retry fixture requires a source checkout and the default image workload.');
+}
 if ($scheduler && ($worker || $sourceType !== 'git')) {
     throw new RuntimeException('The scheduler fixture requires a public Git deployment without a queue worker.');
 }
@@ -81,13 +85,14 @@ if ($worker || $withDatabase) {
     ];
 }
 $client = new EasyPanelClient($url, $token, timeout: 45);
-$provider = new EasyPanelProvider([
+$providerConfig = [
     'url' => $url,
     'auth_token' => $token,
     'managed_prefix' => $prefix,
     'service_name' => $expectedService,
     'source' => $source,
-], $client);
+];
+$provider = new EasyPanelProvider($providerConfig, $client);
 
 $project = new class($name, $worker, $scheduler, $schedulerCommand, $database) {
     public function __construct(private readonly string $name, private readonly bool $worker, private readonly bool $scheduler, private readonly string $schedulerCommand, private readonly string $database) {}
@@ -206,6 +211,39 @@ echo "Disposable lifecycle project: {$expectedProject}\n";
 $applyFailed = false;
 
 try {
+    if ($retry) {
+        $interruption = 'Injected interruption after EasyPanel created the app.';
+        $createdProject = false;
+        $transport = static function (string $procedure, array $input) use ($client, $interruption, &$createdProject, $expectedProject): mixed {
+            if ($procedure === 'createAppService') {
+                $client->createAppService($input['projectName'], $input['serviceName'], $input['env']);
+                throw new RuntimeException($interruption);
+            }
+            $response = $client->call($procedure, $input);
+            if ($procedure === 'projects.createProject' && ($input['name'] ?? null) === $expectedProject) {
+                $createdProject = true;
+            }
+            return $response;
+        };
+        $interrupted = new EasyPanelProvider($providerConfig, new EasyPanelClient($url, $token, timeout: 45, transport: $transport));
+        if ($interrupted->apply($project, $profile) || $interrupted->getLastError() !== 'EasyPanel deployment failed: '.$interruption) {
+            if ($createdProject) {
+                $inventory = $client->listProjectsAndServices();
+                if (in_array($expectedProject, array_column($inventory['projects'], 'name'), true)
+                    && ! in_array($expectedProject, array_column($inventory['services'], 'projectName'), true)) {
+                    $client->destroyProject($expectedProject);
+                }
+            }
+            throw new RuntimeException('EasyPanel apply did not report the injected interruption: '.$interrupted->getLastError());
+        }
+        $app = $client->inspectAppService($expectedProject, $expectedService);
+        $environment = is_string($app['env'] ?? null) ? preg_split('/\\R/', $app['env']) : [];
+        if (! in_array('SHIPPERCLI_MANAGED=1', $environment, true)
+            || ! in_array('SHIPPERCLI_MANAGED_PROJECT='.$expectedProject, $environment, true)) {
+            throw new RuntimeException('The interrupted app did not retain its ownership markers.');
+        }
+        echo "Verified the partial deployment before retry.\n";
+    }
     if ($published) {
         $runShipper(['apply', $name, '--profile=v1', '--force']);
     } elseif (! $provider->apply($project, $profile)) {

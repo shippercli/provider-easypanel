@@ -25,6 +25,10 @@ on:
         type: choice
         options: [none, mariadb, postgres, mongo, redis]
         default: none
+      retry:
+        description: Resume a disposable app left at the app creation step
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -49,16 +53,18 @@ jobs:
       github.event_name == 'workflow_dispatch' &&
       ((inputs.worker && inputs.scheduler) ||
        (inputs.database != 'none' && (inputs.worker || inputs.scheduler || inputs.source != 'image' ||
-        (inputs.published && inputs.database != 'redis'))))
+        (inputs.published && inputs.database != 'redis'))) ||
+       (inputs.retry && (inputs.published || inputs.worker || inputs.scheduler || inputs.source != 'image' || inputs.database != 'none')))
     runs-on: ubuntu-latest
     steps:
       - run: |
-          echo '::error::Select one workload fixture. Select image source for database fixtures. Redis supports published installs.'
+          echo '::error::Select one workload fixture. Retry requires a source checkout and the default image. Redis supports published installs.'
           exit 1
 
   disposable-lifecycle:
     if: >-
       inputs.published != true && !(inputs.worker && inputs.scheduler) &&
+      (!inputs.retry || (!inputs.worker && !inputs.scheduler && inputs.source == 'image' && inputs.database == 'none')) &&
       (inputs.database == '' || inputs.database == 'none' || (!inputs.worker && !inputs.scheduler && inputs.source == 'image')) &&
       (github.ref == 'refs/heads/main' ||
        (github.event_name == 'workflow_dispatch' &&
@@ -66,7 +72,8 @@ jobs:
          github.ref == 'refs/heads/codex/easypanel-public-git' ||
          github.ref == 'refs/heads/codex/easypanel-worker-live' ||
          github.ref == 'refs/heads/codex/easypanel-scheduler-live' ||
-         github.ref == 'refs/heads/codex/easypanel-redis-default')))
+         github.ref == 'refs/heads/codex/easypanel-redis-default' ||
+         github.ref == 'refs/heads/codex/easypanel-interrupted-retry')))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -85,11 +92,12 @@ jobs:
           SHIPPER_E2E_SCHEDULER: ${{ inputs.scheduler }}
           SHIPPER_E2E_WORKER: ${{ inputs.worker }}
           SHIPPER_E2E_DATABASE: ${{ inputs.database }}
+          SHIPPER_E2E_RETRY: ${{ inputs.retry }}
         run: php tests/live-e2e.php
 
   published-lifecycle:
     if: >-
-      github.event_name == 'workflow_dispatch' && inputs.published && !(inputs.worker && inputs.scheduler) &&
+      github.event_name == 'workflow_dispatch' && inputs.published && !inputs.retry && !(inputs.worker && inputs.scheduler) &&
       (inputs.database == 'none' ||
        (inputs.database == 'redis' && !inputs.worker && !inputs.scheduler && inputs.source == 'image')) &&
       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/easypanel-redis-release')
