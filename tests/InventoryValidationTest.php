@@ -26,7 +26,7 @@ final class InventoryValidationTest extends TestCase
                 'source' => ['type' => 'image', 'image' => 'nginx:alpine'],
             ], $client);
             $project = new class { public function name(): string { return 'api'; } };
-            $profile = new class { public function name(): string { return 'preview'; } };
+            $profile = new class { public function name(): string { return 'staging'; } };
             self::assertTrue($provider->plan($project, $profile)['blocked']);
             self::assertFalse($provider->apply($project, $profile));
             self::assertFalse($provider->destroy($project, $profile));

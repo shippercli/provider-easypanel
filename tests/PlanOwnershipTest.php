@@ -10,7 +10,7 @@ final class PlanOwnershipTest extends TestCase
 {
     public function testPlanChecksOwnershipWithoutWrites(): void
     {
-        $name = 'shipper-api-preview-'.substr(hash('sha256', json_encode(['api', 'preview'], JSON_THROW_ON_ERROR)), 0, 20);
+        $name = 'shipper-api-staging-'.substr(hash('sha256', json_encode(['api', 'staging'], JSON_THROW_ON_ERROR)), 0, 20);
         foreach (['new', 'owned', 'unowned', 'wrong-type', 'malformed', 'legacy', 'error'] as $mode) {
             $calls = [];
             $client = new EasyPanelClient('https://panel.example.com', 'token', transport: static function (string $procedure, array $input) use (&$calls, $mode, $name): array {
@@ -18,7 +18,7 @@ final class PlanOwnershipTest extends TestCase
                 if ($mode === 'error') throw new \RuntimeException('sensitive API error');
                 if ($procedure === 'projects.listProjectsAndServices') {
                     return [
-                        'projects' => [['name' => $mode === 'legacy' ? 'shipper-api-preview' : $name]],
+                        'projects' => [['name' => $mode === 'legacy' ? 'shipper-api-staging' : $name]],
                         'services' => in_array($mode, ['new', 'legacy'], true) ? [] : [[
                             'projectName' => $name, 'name' => 'app', 'type' => $mode === 'wrong-type' ? 'mysql' : 'app',
                         ]],
@@ -35,7 +35,7 @@ final class PlanOwnershipTest extends TestCase
                 'source' => ['type' => 'image', 'image' => 'nginx:alpine'],
             ], $client);
             $project = new class { public function name(): string { return 'api'; } };
-            $profile = new class { public function name(): string { return 'preview'; } };
+            $profile = new class { public function name(): string { return 'staging'; } };
             $plan = $provider->plan($project, $profile);
             self::assertSame(! in_array($mode, ['new', 'owned'], true), $plan['blocked'], $mode);
             foreach ($calls as $call) self::assertContains($call, ['projects.listProjectsAndServices', 'services.app.inspectService']);
