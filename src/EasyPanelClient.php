@@ -452,7 +452,13 @@ final class EasyPanelClient
         } catch (\JsonException) {
             throw new \RuntimeException('EasyPanel API returned invalid JSON.');
         }
-        if (in_array($procedure, ['services.app.updateSourceImage', 'services.app.destroyService', 'services.app.updateEnv'], true)) {
+        if (in_array($procedure, [
+            'services.app.updateSourceImage',
+            'services.app.destroyService',
+            'services.app.updateEnv',
+            'services.app.deployService',
+            'projects.destroyProject',
+        ], true)) {
             $result = $shape instanceof \stdClass ? ($shape->result ?? null) : null;
             $data = $result instanceof \stdClass ? ($result->data ?? null) : null;
             fwrite(STDERR, sprintf(
