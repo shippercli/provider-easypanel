@@ -260,11 +260,15 @@ final class EasyPanelClient
 
     public function updateDockerfileSource(string $projectName, string $serviceName, string $dockerfile): void
     {
-        $this->call('services.app.updateSourceDockerfile', [
-            'projectName' => $projectName,
-            'serviceName' => $serviceName,
-            'dockerfile' => $dockerfile,
-        ]);
+        try {
+            $this->call('services.app.updateSourceDockerfile', [
+                'projectName' => $projectName,
+                'serviceName' => $serviceName,
+                'dockerfile' => $dockerfile,
+            ]);
+        } catch (\RuntimeException $exception) {
+            throw new \RuntimeException('EasyPanel Dockerfile source update failed: '.$exception->getMessage(), previous: $exception);
+        }
     }
 
     public function updateEnvironment(string $projectName, string $serviceName, string $env): void
