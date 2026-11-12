@@ -107,7 +107,64 @@ if ($disposable) {
     echo "Disposable lifecycle project: {$expectedProject}\n";
 }
 
+$probeRuntimeInventory = static function (string $phase) use ($url, $token, $expectedProject, $expectedService): void {
+    $query = http_build_query(['service' => $expectedProject.'_'.$expectedService]);
+    $handle = curl_init(rtrim($url, '/').'/api/getDockerContainers?'.$query);
+    if ($handle === false) {
+        throw new RuntimeException('Unable to initialize the runtime inventory request.');
+    }
+    curl_setopt_array($handle, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 20,
+        CURLOPT_PROTOCOLS_STR => 'HTTPS',
+        CURLOPT_HTTPHEADER => ['Authorization: Bearer '.$token],
+    ]);
+    $response = curl_exec($handle);
+    $httpStatus = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+    unset($handle);
+    $containers = $httpStatus === 200 && is_string($response) ? json_decode($response) : null;
+    $identity = $expectedProject.'_'.$expectedService;
+    $serviceLabels = 0;
+    $matchingLabels = 0;
+    $matchingNames = 0;
+    $runningStates = 0;
+    foreach (is_array($containers) ? $containers : [] as $container) {
+        $serviceLabel = $container->Labels->{'com.docker.swarm.service.name'} ?? null;
+        $serviceLabels += is_string($serviceLabel) ? 1 : 0;
+        $matchingLabels += $serviceLabel === $identity ? 1 : 0;
+        $runningStates += ($container->State ?? null) === 'running' ? 1 : 0;
+        $names = $container->Names ?? [];
+        foreach (is_array($names) ? $names : [] as $name) {
+            if (is_string($name) && str_starts_with(ltrim($name, '/'), $identity.'.')) {
+                $matchingNames++;
+                break;
+            }
+        }
+    }
+    printf(
+        "Disposable runtime inventory %s: HTTP %d, shape=%s, list_count=%d, service_labels=%d, matching_labels=%d, matching_names=%d, running_states=%d\n",
+        $phase,
+        $httpStatus,
+        gettype($containers),
+        is_array($containers) ? count($containers) : 0,
+        $serviceLabels,
+        $matchingLabels,
+        $matchingNames,
+        $runningStates,
+    );
+};
+
 try {
+    if ($disposable) {
+        $client->createProject($expectedProject);
+        $client->createAppService(
+            $expectedProject,
+            $expectedService,
+            "SHIPPERCLI_MANAGED=1\nSHIPPERCLI_MANAGED_PROJECT={$expectedProject}",
+        );
+        $probeRuntimeInventory('before deployment');
+    }
+
     if (! $provider->apply($project, $profile)) {
         if ($disposable && $requestedDomain !== null) {
             $bindingSaved = false;
@@ -231,31 +288,7 @@ try {
         }
         echo "Provider status: {$status['state']}\n";
 
-        $query = http_build_query(['service' => $expectedProject.'_'.$expectedService]);
-        $handle = curl_init(rtrim($url, '/').'/api/getDockerContainers?'.$query);
-        if ($handle === false) {
-            throw new RuntimeException('Unable to initialize the runtime inventory request.');
-        }
-        curl_setopt_array($handle, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 20,
-            CURLOPT_PROTOCOLS_STR => 'HTTPS',
-            CURLOPT_HTTPHEADER => ['Authorization: Bearer '.$token],
-        ]);
-        $response = curl_exec($handle);
-        $httpStatus = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
-        unset($handle);
-        $containers = $httpStatus === 200 && is_string($response) ? json_decode($response) : null;
-        printf(
-            "Disposable runtime inventory: HTTP %d, shape=%s, list_count=%d, object_array_counts=%s\n",
-            $httpStatus,
-            gettype($containers),
-            is_array($containers) ? count($containers) : 0,
-            json_encode($containers instanceof stdClass ? array_values(array_map(
-                'count',
-                array_filter(get_object_vars($containers), 'is_array'),
-            )) : [], JSON_THROW_ON_ERROR),
-        );
+        $probeRuntimeInventory('after HTTPS readiness');
 
         if (! $provider->apply($project, $profile)) {
             throw new RuntimeException('Redeploy failed: '.$provider->getLastError());
