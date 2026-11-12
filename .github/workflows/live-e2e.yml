@@ -63,6 +63,31 @@ jobs:
       EASYPANEL_URL: ${{ secrets.EASYPANEL_URL }}
       EASYPANEL_AUTH_TOKEN: ${{ secrets.EASYPANEL_AUTH_TOKEN }}
     steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - run: composer install --no-interaction --prefer-dist
+      - name: Check the dedicated demo project identities
+        run: |
+          php <<'PHP'
+          <?php
+          require 'vendor/autoload.php';
+          $url = getenv('EASYPANEL_URL');
+          $token = getenv('EASYPANEL_AUTH_TOKEN');
+          if (!$url || !$token) {
+              throw new RuntimeException('EasyPanel credentials are required.');
+          }
+          $client = new ShipperCli\ProviderEasyPanel\EasyPanelClient($url, $token, timeout: 20);
+          $names = array_column($client->listProjectsAndServices()['projects'], 'name');
+          foreach ([
+              'Legacy demo' => 'shippercli-demo-provider-v1',
+              'Scoped demo' => 'shippercli-demo-provider-v1-811454f76c57a1580028',
+          ] as $label => $name) {
+              echo $label.': '.(in_array($name, $names, true) ? 'present' : 'absent').PHP_EOL;
+          }
+          PHP
       - name: Check the public inventory route
         run: |
           test -n "$EASYPANEL_URL"
