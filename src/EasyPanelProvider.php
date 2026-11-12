@@ -570,8 +570,13 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
                     || ! \is_string($available[$prefix.'_PASSWORD'] ?? null) || $available[$prefix.'_PASSWORD'] === '') {
                     throw new \RuntimeException("Existing EasyPanel database {$serviceName} requires matching {$prefix} connection settings and a password in the application environment.");
                 }
-                if ($type === 'redis') {
-                    $environment[$prefix.'_USERNAME'] = $username;
+                if ($type === 'redis' && $available[$prefix.'_USERNAME'] !== $username) {
+                    $environment = [...$environment,
+                        $prefix.'_HOST' => $available[$prefix.'_HOST'],
+                        $prefix.'_DATABASE' => $databaseName,
+                        $prefix.'_USERNAME' => $username,
+                        $prefix.'_PASSWORD' => $available[$prefix.'_PASSWORD'],
+                    ];
                 }
                 continue;
             }
