@@ -108,6 +108,20 @@ final class EasyPanelClient
         ]);
     }
 
+    public function initializeBoxService(string $projectName, string $serviceName): void
+    {
+        $input = ['projectName' => $projectName, 'serviceName' => $serviceName];
+        if ($this->transport !== null) {
+            ($this->transport)('initBoxService', $input);
+            return;
+        }
+
+        $response = \trim($this->post('/api/initBoxService', 'Bearer '.$this->authToken, $input));
+        if ($response !== '' && $response !== 'null') {
+            throw new \RuntimeException('EasyPanel returned an unexpected Box initialization response.');
+        }
+    }
+
     public function cloneBoxRepository(string $projectName, string $serviceName, string $url, string $branch, bool $private = false): void
     {
         $input = [

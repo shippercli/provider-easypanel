@@ -476,6 +476,11 @@ final class EasyPanelProviderTest extends TestCase
         $cloneCalls = array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'gitBoxClone'));
         self::assertCount(1, $cloneCalls);
         self::assertFalse($cloneCalls[0][1]['private']);
+        $procedures = array_column($calls, 0);
+        self::assertContains('services.box.updateEnv', $procedures);
+        self::assertContains('initBoxService', $procedures);
+        self::assertLessThan(array_search('initBoxService', $procedures, true), array_search('services.box.updateEnv', $procedures, true));
+        self::assertLessThan(array_search('gitBoxClone', $procedures, true), array_search('initBoxService', $procedures, true));
     }
 
     public function test_apply_refuses_an_unmanaged_service_before_any_mutation(): void

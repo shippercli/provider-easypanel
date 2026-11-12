@@ -682,14 +682,24 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             throw new \RuntimeException('EasyPanel scheduler service name is already used by a non-Box service.');
         }
         $existingEnvironment = '';
+        $initialize = $service === null;
         if ($service !== null) {
             $inspected = $client->inspectBoxService($projectName, $serviceName);
             $existingEnvironment = $this->ownedWorkloadEnvironment($inspected, $projectName, 'CRON', $serviceName);
+            $initialize = ($inspected['codeInitialized'] ?? null) === false;
         }
         if ($service === null) {
             $client->createBoxService($projectName, $serviceName);
         }
 
+        $this->writeVerifiedEnvironment(
+            $client, $project, $projectName, $serviceName,
+            $this->environment($projectName, $profile, $databaseEnvironment, $existingEnvironment, $project)."\nSHIPPERCLI_MANAGED_CRON={$serviceName}",
+            'box',
+        );
+        if ($initialize) {
+            $client->initializeBoxService($projectName, $serviceName);
+        }
         $repository = $this->cronRepository($source);
         $client->cloneBoxRepository(
             $projectName,
@@ -697,11 +707,6 @@ final class EasyPanelProvider implements DeploymentLogsProviderInterface, Deploy
             $repository,
             $this->profileBranch($profile),
             $this->privateRepository($source),
-        );
-        $this->writeVerifiedEnvironment(
-            $client, $project, $projectName, $serviceName,
-            $this->environment($projectName, $profile, $databaseEnvironment, $existingEnvironment, $project)."\nSHIPPERCLI_MANAGED_CRON={$serviceName}",
-            'box',
         );
 
         $scripts = [];
