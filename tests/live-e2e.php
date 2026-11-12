@@ -18,8 +18,8 @@ $sourceType = getenv('SHIPPER_E2E_SOURCE') ?: 'image';
 if ($scheduler && ($worker || $sourceType !== 'git')) {
     throw new RuntimeException('The scheduler fixture requires a public Git deployment without a queue worker.');
 }
-if ($withDatabase && ($published || $worker || $scheduler || $sourceType !== 'image')) {
-    throw new RuntimeException('The database fixture requires a standalone source checkout dispatch.');
+if ($withDatabase && ($worker || $scheduler || $sourceType !== 'image' || ($published && $database !== 'redis'))) {
+    throw new RuntimeException('The database fixture requires an image dispatch. Published database verification supports Redis.');
 }
 $expectedBody = match (true) {
     $withDatabase => 'shippercli-'.$database.'-query-ok',
@@ -166,14 +166,14 @@ $runShipper = static function (array $arguments) use ($shipper): void {
     }
 };
 if ($published) {
-    foreach (['shippercli/cli' => '1.0.4', 'shippercli/provider-easypanel' => '2.0.3'] as $package => $version) {
+    foreach (['shippercli/cli' => '1.0.4', 'shippercli/provider-easypanel' => '2.0.4'] as $package => $version) {
         $installed = Composer\InstalledVersions::getPrettyVersion($package);
         if (! is_string($installed) || ltrim($installed, 'v') !== $version) {
             throw new RuntimeException('Unexpected published version for '.$package);
         }
         echo $package.' '.$installed.' '.Composer\InstalledVersions::getReference($package).PHP_EOL;
     }
-    if (Composer\InstalledVersions::getReference('shippercli/provider-easypanel') !== 'd28bd36a0390ce15f3c65e8fcd46f5e712be71a6') {
+    if (Composer\InstalledVersions::getReference('shippercli/provider-easypanel') !== '2850f2d3dc303e9e05f79d444a01723ef730cc42') {
         throw new RuntimeException('Unexpected published EasyPanel source reference.');
     }
     $runShipper(['validate']);
@@ -385,6 +385,9 @@ try {
     // Omit the declared database so destroy reconciles the disposable, marker-owned service.
     $cleanupProject = $withDatabase ? new ($project::class)($name, false, false, $schedulerCommand, 'none') : $project;
     if ($published) {
+        if ($withDatabase && ! rename('shipper-cleanup.yml', 'shipper.yml')) {
+            throw new RuntimeException('Unable to switch to the disposable cleanup configuration.');
+        }
         $runShipper(['destroy', $name, '--profile=v1', '--force']);
     } elseif (! $provider->destroy($cleanupProject, $profile)) {
         if (! $scheduler || ! $applyFailed) {
