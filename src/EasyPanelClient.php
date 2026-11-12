@@ -453,6 +453,7 @@ final class EasyPanelClient
             throw new \RuntimeException('EasyPanel API returned invalid JSON.');
         }
         if (in_array($procedure, [
+            'domains.createDomain',
             'services.app.updateSourceImage',
             'services.app.destroyService',
             'services.app.updateEnv',

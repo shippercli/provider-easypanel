@@ -109,6 +109,23 @@ if ($disposable) {
 
 try {
     if (! $provider->apply($project, $profile)) {
+        if ($disposable && $requestedDomain !== null) {
+            $bindingSaved = false;
+            foreach ($client->listDomains($expectedProject, $expectedService) as $domain) {
+                if (
+                    strcasecmp($domain['host'], $requestedDomain) === 0
+                    && ($domain['https'] ?? null) === true
+                    && ($domain['destinationType'] ?? null) === 'service'
+                    && ($domain['serviceDestination']['projectName'] ?? null) === $expectedProject
+                    && ($domain['serviceDestination']['serviceName'] ?? null) === $expectedService
+                    && ($domain['serviceDestination']['port'] ?? null) === 80
+                ) {
+                    $bindingSaved = true;
+                    break;
+                }
+            }
+            echo $bindingSaved ? "Exact HTTPS binding persisted.\n" : "Exact HTTPS binding absent.\n";
+        }
         throw new RuntimeException($provider->getLastError());
     }
 
