@@ -37,6 +37,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  reject-published-scheduler:
+    if: github.event_name == 'workflow_dispatch' && inputs.published && inputs.scheduler
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo '::error::The scheduler fixture requires a source checkout. Dispatch with published=false.'
+          exit 1
+
   disposable-lifecycle:
     if: >-
       inputs.published != true &&
@@ -67,7 +75,7 @@ jobs:
 
   published-lifecycle:
     if: >-
-      github.event_name == 'workflow_dispatch' && inputs.published &&
+      github.event_name == 'workflow_dispatch' && inputs.published && !inputs.scheduler &&
       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/easypanel-worker-release')
     runs-on: ubuntu-latest
     timeout-minutes: 12
