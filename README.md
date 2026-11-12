@@ -70,7 +70,7 @@ legacy databases are blocked from reuse and preserved during cleanup.
 ## Install
 
 ```bash
-composer require shippercli/provider-easypanel
+composer require 'shippercli/provider-easypanel:^2.0'
 ```
 
 Use Shipper CLI 1.0.4 or later for CLI enforcement of blocked plans.
@@ -113,7 +113,7 @@ projects:
           APP_ENV: production
 ```
 
-The resulting EasyPanel project is named `shipper-backend-production`. If no profile domain is supplied, Shipper keeps any existing app domains. For an app with no domains, Shipper creates an HTTPS binding using the panel's configured service base domain, when available. Set `automatic_domain: false` in the EasyPanel provider configuration to skip automatic domain creation for internal apps. An explicit profile domain still applies.
+The resulting EasyPanel project is named `shipper-backend-production-f06044f28547c24eaf3b`. If no profile domain is supplied, Shipper keeps any existing app domains. For an app with no domains, Shipper creates an HTTPS binding using the panel's configured service base domain, when available. Set `automatic_domain: false` in the EasyPanel provider configuration to skip automatic domain creation for internal apps. An explicit profile domain still applies.
 
 ## Source types
 
