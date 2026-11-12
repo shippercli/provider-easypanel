@@ -368,9 +368,11 @@ try {
         $runShipper(['logs', $name, '--profile=v1', '--lines=10']);
     }
 } finally {
+    // Omit the declared database so destroy reconciles the disposable, marker-owned service.
+    $cleanupProject = $mariadb ? new ($project::class)($name, false, false, $schedulerCommand, false) : $project;
     if ($published) {
         $runShipper(['destroy', $name, '--profile=v1', '--force']);
-    } elseif (! $provider->destroy($project, $profile)) {
+    } elseif (! $provider->destroy($cleanupProject, $profile)) {
         if (! $scheduler || ! $applyFailed) {
             throw new RuntimeException('Disposable lifecycle cleanup failed: '.$provider->getLastError());
         }
