@@ -265,7 +265,46 @@ try {
         $runShipper(['apply', $name, '--profile=v1', '--force']);
     } elseif (! $provider->apply($project, $profile)) {
         $applyFailed = true;
-        throw new RuntimeException($provider->getLastError());
+        $error = $provider->getLastError();
+        if ($sourceType === 'github' && str_contains($error, 'procedure services.app.deployService failed (HTTP 400)')) {
+            $app = $client->inspectAppService($expectedProject, $expectedService);
+            $environment = is_string($app['env'] ?? null) ? preg_split('/\\R/', $app['env']) : [];
+            if (! in_array('SHIPPERCLI_MANAGED=1', $environment, true)
+                || ! in_array('SHIPPERCLI_MANAGED_PROJECT='.$expectedProject, $environment, true)) {
+                throw new RuntimeException('REST comparison could not verify disposable app ownership.');
+            }
+            $identity = ['projectName' => $expectedProject, 'serviceName' => $expectedService];
+            $calls = [
+                '/api/getServiceError?'.http_build_query($identity) => null,
+                '/api/deployAppService' => json_encode($identity, JSON_THROW_ON_ERROR),
+            ];
+            foreach ($calls as $path => $body) {
+                $request = curl_init(rtrim($url, '/').$path);
+                $options = [
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_FOLLOWLOCATION => false,
+                    CURLOPT_TIMEOUT => 30,
+                    CURLOPT_HTTPHEADER => ['Authorization: Bearer '.$token, 'Content-Type: application/json'],
+                ];
+                if ($body !== null) {
+                    $options[CURLOPT_POSTFIELDS] = $body;
+                }
+                curl_setopt_array($request, $options);
+                $response = curl_exec($request);
+                $status = curl_getinfo($request, CURLINFO_RESPONSE_CODE);
+                $class = match (true) {
+                    ! is_string($response) => 'transport-error',
+                    preg_match('/rate.limit|too many requests/i', $response) === 1 => 'rate-limit',
+                    preg_match('/github app|github integration|installation/i', $response) === 1 => 'github-integration',
+                    preg_match('/not configured|not connected|missing token/i', $response) === 1 => 'missing-configuration',
+                    preg_match('/not found|does not exist/i', $response) === 1 => 'not-found',
+                    default => 'unclassified',
+                };
+                $operation = $body === null ? 'getServiceError' : 'deployAppService';
+                echo "REST comparison: {$operation} HTTP {$status} ({$class})\n";
+            }
+        }
+        throw new RuntimeException($error);
     }
 
     $inventory = $client->listProjectsAndServices();

@@ -74,7 +74,8 @@ jobs:
          github.ref == 'refs/heads/codex/easypanel-worker-live' ||
          github.ref == 'refs/heads/codex/easypanel-scheduler-live' ||
          github.ref == 'refs/heads/codex/easypanel-redis-default' ||
-         github.ref == 'refs/heads/codex/easypanel-interrupted-retry')))
+         github.ref == 'refs/heads/codex/easypanel-interrupted-retry' ||
+         (github.ref == 'refs/heads/codex/easypanel-rest-comparison' && inputs.source == 'github'))))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
