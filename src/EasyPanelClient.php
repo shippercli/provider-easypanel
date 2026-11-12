@@ -597,6 +597,7 @@ final class EasyPanelClient
             'services.app.updateEnv',
             'services.app.destroyService',
             'services.box.updateEnv',
+            'services.box.updateScripts',
             'services.box.destroyService',
         ], true)) {
             return $shape;
