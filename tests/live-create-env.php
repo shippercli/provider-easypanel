@@ -22,7 +22,18 @@ if (in_array($project, array_column($client->listProjectsAndServices()['projects
     throw new RuntimeException('Disposable project name is already in use.');
 }
 
-$client->createProject($project);
+echo "Disposable EasyPanel project: {$project}\n";
+try {
+    $client->createProject($project);
+} catch (RuntimeException $error) {
+    $exists = in_array($project, array_column($client->listProjectsAndServices()['projects'], 'name'), true);
+    if ($exists) {
+        throw new RuntimeException('Project creation could not be confirmed. Inspect the disposable project for manual cleanup.', previous: $error);
+    }
+
+    throw $error;
+}
+
 try {
     $client->call('services.app.createService', [
         'projectName' => $project,
@@ -30,12 +41,10 @@ try {
         'env' => $marker,
     ]);
     $details = $client->inspectAppService($project, $service);
-    $env = is_string($details['env'] ?? null) ? $details['env'] : '';
-    if (! in_array($marker, preg_split('/\R/', $env) ?: [], true)) {
-        throw new RuntimeException('The app create route did not persist the environment marker.');
+    if (! is_string($details['env'] ?? null)) {
+        throw new RuntimeException('The app inspection did not return a valid environment.');
     }
-
-    echo "The app create route persisted the environment marker.\n";
+    $persisted = in_array($marker, preg_split('/\R/', $details['env']) ?: [], true);
 } finally {
     foreach ($client->listProjectsAndServices()['services'] as $entry) {
         if ($entry['projectName'] === $project && ($entry['name'] !== $service || $entry['type'] !== 'app')) {
@@ -48,3 +57,5 @@ try {
     }
     echo "Disposable project cleanup verified.\n";
 }
+
+echo $persisted ? "Environment marker persisted.\n" : "Environment marker ignored.\n";

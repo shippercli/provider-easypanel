@@ -40,7 +40,7 @@ jobs:
         run: php tests/live-e2e.php
 
   probe-create-env:
-    if: github.event_name == 'workflow_dispatch' && inputs.probe-create-env
+    if: github.event_name == 'workflow_dispatch' && inputs.probe-create-env && github.ref == 'refs/heads/codex/easypanel-create-probe'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
