@@ -36,10 +36,14 @@ $prefix = 's-';
 $expectedProject = $prefix.$name.'-v1-'.substr(hash('sha256', json_encode([$name, 'v1'], JSON_THROW_ON_ERROR)), 0, 20);
 $expectedService = 'web';
 $schedulerPath = '/shipper-cron-'.bin2hex(random_bytes(12));
-$schedulerUrl = 'http://'.$expectedProject.'_'.$expectedService.$schedulerPath;
+$manualPath = '/shipper-manual-'.bin2hex(random_bytes(12));
 // Nginx logs the request even though this unique path returns 404.
-$schedulerCommand = 'curl --max-time 5 -sS '.escapeshellarg($schedulerUrl)
-    .' || wget -T 5 -qO- '.escapeshellarg($schedulerUrl);
+$probeCommand = static function (string $path) use ($expectedProject, $expectedService): string {
+    $target = escapeshellarg('http://'.$expectedProject.'_'.$expectedService.$path);
+
+    return 'curl --max-time 5 -sS '.$target.' || wget -T 5 -qO- '.$target;
+};
+$schedulerCommand = $probeCommand($schedulerPath);
 $source = $sourceType === 'git' ? [
     'type' => 'git',
     'repo' => 'https://github.com/shippercli/provider-easypanel.git',
@@ -271,6 +275,7 @@ try {
         echo "EasyPanel disposable Box script registration verified.\n";
         $boxRunning = false;
         $inspectContainer = true;
+        $manualObserved = false;
         for ($attempt = 1; $attempt <= 25; $attempt++) {
             if ($inspectContainer && ! $boxRunning) {
                 try {
@@ -281,11 +286,30 @@ try {
                 }
                 if ($boxRunning) {
                     echo "EasyPanel disposable Box container is running.\n";
+                    $manual = curl_init(rtrim($url, '/').'/api/runBoxScript');
+                    curl_setopt_array($manual, [
+                        CURLOPT_POST => true,
+                        CURLOPT_RETURNTRANSFER => true,
+                        CURLOPT_TIMEOUT => 20,
+                        CURLOPT_HTTPHEADER => ['Authorization: Bearer '.$token, 'Content-Type: application/json'],
+                        CURLOPT_POSTFIELDS => json_encode([
+                            'projectName' => $expectedProject,
+                            'serviceName' => 'scheduler',
+                            'name' => 'shipper-manual-probe',
+                            'content' => $probeCommand($manualPath),
+                        ], JSON_THROW_ON_ERROR),
+                    ]);
+                    curl_exec($manual);
+                    echo 'EasyPanel manual Box probe HTTP status '.curl_getinfo($manual, CURLINFO_RESPONSE_CODE).".\n";
                 }
             }
             $logs = $client->queryServiceLogs($expectedProject, $expectedService, ['limit' => 30]);
             foreach ($logs as $record) {
                 $message = $record['message'] ?? $record['line'] ?? $record['text'] ?? null;
+                if (! $manualObserved && is_string($message) && str_contains($message, 'GET '.$manualPath.' HTTP/')) {
+                    $manualObserved = true;
+                    echo "EasyPanel manual Box request observed in web service logs.\n";
+                }
                 if (is_string($message) && str_contains($message, 'GET '.$schedulerPath.' HTTP/')) {
                     echo "EasyPanel disposable scheduled command execution verified.\n";
                     break 2;
@@ -293,7 +317,9 @@ try {
             }
             if ($attempt === 25) {
                 throw new RuntimeException($boxRunning
-                    ? 'The Box container ran, but the web service did not log the expected scheduled request.'
+                    ? ($manualObserved
+                        ? 'The web service logged the manual Box request. The scheduled request was absent.'
+                        : 'The web service logged neither the manual Box request nor the scheduled request.')
                     : 'EasyPanel reported neither a running Box container nor the expected scheduled request.');
             }
             sleep(5);
