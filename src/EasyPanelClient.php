@@ -414,11 +414,23 @@ final class EasyPanelClient
     /** @param array<string, mixed> $deploy */
     public function updateAppDeployment(string $projectName, string $serviceName, array $deploy): void
     {
-        $this->call('services.app.updateDeploy', [
+        $result = $this->call('services.app.updateDeploy', [
             'projectName' => $projectName,
             'serviceName' => $serviceName,
             'deploy' => $deploy,
         ]);
+        if ($result instanceof \stdClass && (array) $result === []) {
+            $inspection = $this->inspectAppService($projectName, $serviceName);
+            $saved = $inspection['deploy'] ?? null;
+            if (! \is_array($saved) || $deploy === []) {
+                throw new \RuntimeException('EasyPanel app deployment settings could not be verified.');
+            }
+            foreach ($deploy as $key => $value) {
+                if (! \array_key_exists($key, $saved) || $saved[$key] !== $value) {
+                    throw new \RuntimeException('EasyPanel app deployment settings could not be verified.');
+                }
+            }
+        }
     }
 
     /** @param array<string, mixed> $filters @return array<int, array<string, mixed>> */
@@ -559,6 +571,7 @@ final class EasyPanelClient
             'domains.createDomain',
             'projects.destroyProject',
             'services.app.deployService',
+            'services.app.updateDeploy',
             'services.app.updateSourceImage',
             'services.app.updateSourceGit',
             'services.app.updateSourceDockerfile',

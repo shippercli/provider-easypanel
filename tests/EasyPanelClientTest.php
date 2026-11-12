@@ -100,6 +100,35 @@ final class EasyPanelClientTest extends TestCase
         self::assertSame('php artisan queue:work', $calls[0][1]['deploy']['command']);
     }
 
+    public function test_it_verifies_deployment_settings_after_an_empty_acknowledgement(): void
+    {
+        $command = 'php artisan queue:work';
+        foreach ([$command, 'other command', null] as $saved) {
+            $calls = [];
+            $client = new EasyPanelClient(
+                'https://panel.example.com',
+                'token',
+                transport: static function (string $procedure, array $input) use (&$calls, $saved): object|array {
+                    $calls[] = [$procedure, $input];
+
+                    return $procedure === 'services.app.updateDeploy'
+                        ? new \stdClass()
+                        : ['deploy' => $saved === null ? [] : ['command' => $saved]];
+                },
+            );
+
+            $failure = null;
+            try {
+                $client->updateAppDeployment('shipper-demo', 'worker-main', ['command' => $command]);
+            } catch (\RuntimeException $exception) {
+                $failure = $exception->getMessage();
+            }
+            self::assertSame($saved === $command ? null : 'EasyPanel app deployment settings could not be verified.', $failure);
+            self::assertSame(['services.app.updateDeploy', 'services.app.inspectService'], array_column($calls, 0));
+            self::assertSame(['projectName' => 'shipper-demo', 'serviceName' => 'worker-main'], $calls[1][1]);
+        }
+    }
+
     public function test_it_configures_scheduled_box_scripts(): void
     {
         $calls = [];
