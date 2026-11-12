@@ -10,7 +10,7 @@ on:
       source:
         description: Source to deploy on the disposable target
         type: choice
-        options: [image, git]
+        options: [image, git, github]
         default: image
       worker:
         description: Exercise a disposable queue worker with the inline Dockerfile fixture
@@ -52,6 +52,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' &&
       ((inputs.worker && inputs.scheduler) ||
+       (inputs.source == 'github' && (inputs.worker || inputs.scheduler)) ||
        (inputs.database != 'none' && (inputs.worker || inputs.scheduler || inputs.source != 'image' ||
         (inputs.published && inputs.database != 'redis'))) ||
        (inputs.retry && (inputs.published || inputs.worker || inputs.scheduler || inputs.source != 'image' || inputs.database != 'none')))
@@ -64,6 +65,7 @@ jobs:
   disposable-lifecycle:
     if: >-
       inputs.published != true && !(inputs.worker && inputs.scheduler) &&
+      (inputs.source != 'github' || (!inputs.worker && !inputs.scheduler)) &&
       (!inputs.retry || (!inputs.worker && !inputs.scheduler && inputs.source == 'image' && inputs.database == 'none')) &&
       (inputs.database == '' || inputs.database == 'none' || (!inputs.worker && !inputs.scheduler && inputs.source == 'image')) &&
       (github.ref == 'refs/heads/main' ||
@@ -98,6 +100,7 @@ jobs:
   published-lifecycle:
     if: >-
       github.event_name == 'workflow_dispatch' && inputs.published && !inputs.retry && !(inputs.worker && inputs.scheduler) &&
+      (inputs.source != 'github' || (!inputs.worker && !inputs.scheduler)) &&
       (inputs.database == 'none' ||
        (inputs.database == 'redis' && !inputs.worker && !inputs.scheduler && inputs.source == 'image')) &&
       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/easypanel-redis-release')
@@ -150,6 +153,15 @@ jobs:
               cat >> published-fixture/shipper.yml <<'YAML'
                 type: image
                 image: "nginx:alpine"
+          YAML
+              ;;
+            github)
+              cat >> published-fixture/shipper.yml <<'YAML'
+                type: github
+                owner: shippercli
+                repo: provider-easypanel
+                ref: main
+                path: /tests/fixtures/public-git
           YAML
               ;;
             git|scheduler)

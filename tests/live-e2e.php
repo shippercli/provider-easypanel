@@ -29,7 +29,7 @@ $expectedBody = match (true) {
     $withDatabase => 'shippercli-'.$database.'-query-ok',
     $worker => 'ShipperCLI EasyPanel worker fixture web app',
     $scheduler => 'ShipperCLI EasyPanel scheduler fixture',
-    $sourceType === 'git' => 'ShipperCLI EasyPanel public Git fixture',
+    in_array($sourceType, ['git', 'github'], true) => 'ShipperCLI EasyPanel public Git fixture',
     $sourceType === 'image' => '<title>Welcome to nginx!</title>',
     default => throw new RuntimeException('Unsupported live fixture source.'),
 };
@@ -60,15 +60,25 @@ $probeCommand = static function (string $path) use ($expectedProject, $expectedS
     return 'curl --max-time 5 -fsS '.$target.' || wget -T 5 -qO- '.$target;
 };
 $schedulerCommand = $probeCommand('/record/cron/'.$cronNonce);
-$source = $sourceType === 'git' ? [
-    'type' => 'git',
-    'repo' => 'https://github.com/shippercli/provider-easypanel.git',
-    'ref' => getenv('GITHUB_REF_NAME') ?: 'main',
-    'path' => $scheduler ? '/tests/fixtures/scheduler' : '/tests/fixtures/public-git',
-] : [
-    'type' => 'image',
-    'image' => 'nginx:alpine',
-];
+$source = match ($sourceType) {
+    'github' => [
+        'type' => 'github',
+        'owner' => 'shippercli',
+        'repo' => 'provider-easypanel',
+        'ref' => 'main',
+        'path' => '/tests/fixtures/public-git',
+    ],
+    'git' => [
+        'type' => 'git',
+        'repo' => 'https://github.com/shippercli/provider-easypanel.git',
+        'ref' => getenv('GITHUB_REF_NAME') ?: 'main',
+        'path' => $scheduler ? '/tests/fixtures/scheduler' : '/tests/fixtures/public-git',
+    ],
+    default => [
+        'type' => 'image',
+        'image' => 'nginx:alpine',
+    ],
+};
 if ($worker || $withDatabase) {
     $fixture = match ($database) {
         'none' => 'worker',
@@ -184,6 +194,12 @@ if ($published) {
             throw new RuntimeException('Unexpected published source reference for '.$package);
         }
         echo $package.' '.$installed.' '.$reference.PHP_EOL;
+    }
+    if ($sourceType === 'github') {
+        $fixture = Symfony\Component\Yaml\Yaml::parseFile('shipper.yml');
+        if (($fixture['providers']['easypanel']['source'] ?? null) !== $source) {
+            throw new RuntimeException('The published fixture does not declare the expected connected GitHub source.');
+        }
     }
     if ($withDatabase) {
         $fixture = Symfony\Component\Yaml\Yaml::parseFile('shipper.yml');
