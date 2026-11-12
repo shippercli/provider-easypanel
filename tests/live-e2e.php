@@ -7,7 +7,7 @@ use ShipperCli\ProviderEasyPanel\EasyPanelProvider;
 
 $shipper = getenv('SHIPPER_E2E_BIN');
 $published = is_string($shipper) && $shipper !== '';
-$worker = ! $published && getenv('SHIPPER_E2E_WORKER') === 'true';
+$worker = getenv('SHIPPER_E2E_WORKER') === 'true';
 $sourceType = getenv('SHIPPER_E2E_SOURCE') ?: 'image';
 $expectedBody = match ($worker ? 'worker' : $sourceType) {
     'worker' => 'ShipperCLI EasyPanel worker fixture web app',
@@ -43,14 +43,7 @@ $source = $sourceType === 'git' ? [
 if ($worker) {
     $source = [
         'type' => 'dockerfile',
-        'dockerfile' => <<<'DOCKERFILE'
-FROM php:8.3-cli-alpine
-WORKDIR /app
-RUN printf '%s\n' 'ShipperCLI EasyPanel worker fixture web app' > index.html
-RUN printf '%s\n' '<?php' 'if (array_slice($argv, 1) !== ["queue:work", "database", "--queue=default"]) { exit(1); }' 'while (true) { echo "ShipperCLI EasyPanel worker command executed\n"; sleep(5); }' > artisan
-EXPOSE 80
-CMD ["php", "-S", "0.0.0.0:80"]
-DOCKERFILE,
+        'dockerfile' => file_get_contents(__DIR__.'/fixtures/worker.Dockerfile'),
     ];
 }
 $client = new EasyPanelClient($url, $token, timeout: 45);
@@ -78,7 +71,11 @@ $project = new class($name, $worker) {
 
     public function queues(): array
     {
-        return $this->worker ? ['default' => new stdClass()] : [];
+        return $this->worker ? ['default' => new class {
+            public function sleep(): int { return 30; }
+            public function maxTries(): int { return 1; }
+            public function timeout(): int { return 60; }
+        }] : [];
     }
 
     public function hasSection(string $section): bool
@@ -111,14 +108,14 @@ $runShipper = static function (array $arguments) use ($shipper): void {
     }
 };
 if ($published) {
-    foreach (['shippercli/cli' => '1.0.4', 'shippercli/provider-easypanel' => '2.0.1'] as $package => $version) {
+    foreach (['shippercli/cli' => '1.0.4', 'shippercli/provider-easypanel' => '2.0.2'] as $package => $version) {
         $installed = Composer\InstalledVersions::getPrettyVersion($package);
         if (! is_string($installed) || ltrim($installed, 'v') !== $version) {
             throw new RuntimeException('Unexpected published version for '.$package);
         }
         echo $package.' '.$installed.' '.Composer\InstalledVersions::getReference($package).PHP_EOL;
     }
-    if (Composer\InstalledVersions::getReference('shippercli/provider-easypanel') !== 'aab02e776f17fa371382f1e4afd21f8239322ec5') {
+    if (Composer\InstalledVersions::getReference('shippercli/provider-easypanel') !== 'd74d5411f2ba99b7dd1e6d990badc24353c03a3e') {
         throw new RuntimeException('Unexpected published EasyPanel source reference.');
     }
     $runShipper(['validate']);
