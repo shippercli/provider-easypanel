@@ -473,7 +473,11 @@ final class EasyPanelClient
             throw new \RuntimeException('EasyPanel API returned an invalid response.');
         }
         // These void mutations can return an empty object on the legacy API.
-        if ((array) $shape === [] && in_array($procedure, ['services.app.updateSourceImage', 'services.app.destroyService'], true)) {
+        if ((array) $shape === [] && in_array($procedure, [
+            'services.app.updateSourceImage',
+            'services.app.updateEnv',
+            'services.app.destroyService',
+        ], true)) {
             return $shape;
         }
         $result = $shape->result ?? null;

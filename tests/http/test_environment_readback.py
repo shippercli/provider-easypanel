@@ -42,7 +42,7 @@ class EnvironmentReadbackTest(unittest.TestCase):
                     data = []
                 else:
                     raise AssertionError('Unexpected procedure: ' + procedure)
-                payload = json.dumps({'json': data}).encode()
+                payload = b'{}' if procedure == 'services.app.updateEnv' else json.dumps({'json': data}).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
