@@ -26,6 +26,9 @@ foreach ([301, 302, 303, 307, 308, 400, 401, 403, 404, 422, 429, 500, 502] as $s
         if (!str_contains($failure->getMessage(), "HTTP {$status}")) {
             throw new RuntimeException("HTTP status missing from diagnostics: {$status}/{$format}");
         }
+        if ($failure->getCode() !== $status || !str_contains($failure->getMessage(), "procedure status-{$status}-{$format} failed")) {
+            throw new RuntimeException("Procedure or HTTP exception code missing from diagnostics: {$status}/{$format}");
+        }
     }
 }
 foreach (['matching', 'different', 'unrelated'] as $case) {
