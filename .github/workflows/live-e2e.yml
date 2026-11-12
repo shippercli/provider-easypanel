@@ -5,7 +5,9 @@ on:
   push:
     branches: [main]
     paths:
+      - .github/workflows/live-e2e.yml
       - composer.json
+      - composer.lock
       - src/**
       - tests/live-e2e.php
 
@@ -17,8 +19,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy-demo:
-    if: github.ref == 'refs/heads/main'
+  disposable-lifecycle:
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/audit/2026-10-14-fixes')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -31,5 +33,5 @@ jobs:
           php-version: '8.3'
           coverage: none
       - run: composer install --no-interaction --prefer-dist
-      - name: Apply and verify dedicated demo
+      - name: Deploy, verify and clean up disposable app
         run: php tests/live-e2e.php
