@@ -1,0 +1,38 @@
+name: EasyPanel Live Orphan Preview
+
+on: workflow_dispatch
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: easypanel-live-demo
+  cancel-in-progress: false
+
+jobs:
+  orphan-preview:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer:v2
+          coverage: none
+      - name: Confirm the fixture pull request is merged
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/30" --jq .merged)" = true
+      - name: Install published Shipper packages
+        env:
+          COMPOSER_HOME: ${{ runner.temp }}/shipper-composer
+        run: composer global require --no-interaction --prefer-dist shippercli/cli:1.0.6 shippercli/provider-easypanel:2.1.0
+      - name: Verify preview cleanup
+        env:
+          EASYPANEL_URL: ${{ secrets.EASYPANEL_URL }}
+          EASYPANEL_AUTH_TOKEN: ${{ secrets.EASYPANEL_AUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: php tests/live-orphan-preview.php "$RUNNER_TEMP/shipper-composer/vendor/bin/shipper"
