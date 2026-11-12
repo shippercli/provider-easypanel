@@ -10,8 +10,8 @@ $published = is_string($shipper) && $shipper !== '';
 $worker = getenv('SHIPPER_E2E_WORKER') === 'true';
 $scheduler = getenv('SHIPPER_E2E_SCHEDULER') === 'true';
 $sourceType = getenv('SHIPPER_E2E_SOURCE') ?: 'image';
-if ($scheduler && ($worker || $published || $sourceType !== 'git')) {
-    throw new RuntimeException('The scheduler fixture requires an unpublished public Git deployment.');
+if ($scheduler && ($worker || $sourceType !== 'git')) {
+    throw new RuntimeException('The scheduler fixture requires a public Git deployment without a queue worker.');
 }
 $expectedBody = match (true) {
     $worker => 'ShipperCLI EasyPanel worker fixture web app',
@@ -36,7 +36,10 @@ if (! is_string($name) || ! preg_match('/\Ae[a-f0-9]{12}\z/', $name)) {
 $prefix = 's-';
 $expectedProject = $prefix.$name.'-v1-'.substr(hash('sha256', json_encode([$name, 'v1'], JSON_THROW_ON_ERROR)), 0, 20);
 $expectedService = 'web';
-$cronNonce = bin2hex(random_bytes(12));
+$cronNonce = $published && $scheduler ? getenv('SHIPPER_E2E_CRON_NONCE') : bin2hex(random_bytes(12));
+if (! is_string($cronNonce) || ! preg_match('/\A[a-f0-9]{24}\z/', $cronNonce)) {
+    throw new RuntimeException('Invalid disposable scheduler marker.');
+}
 $manualNonce = bin2hex(random_bytes(12));
 $probeCommand = static function (string $path) use ($expectedProject, $expectedService): string {
     $target = escapeshellarg('http://'.$expectedProject.'_'.$expectedService.$path);
@@ -134,14 +137,14 @@ $runShipper = static function (array $arguments) use ($shipper): void {
     }
 };
 if ($published) {
-    foreach (['shippercli/cli' => '1.0.4', 'shippercli/provider-easypanel' => '2.0.2'] as $package => $version) {
+    foreach (['shippercli/cli' => '1.0.4', 'shippercli/provider-easypanel' => '2.0.3'] as $package => $version) {
         $installed = Composer\InstalledVersions::getPrettyVersion($package);
         if (! is_string($installed) || ltrim($installed, 'v') !== $version) {
             throw new RuntimeException('Unexpected published version for '.$package);
         }
         echo $package.' '.$installed.' '.Composer\InstalledVersions::getReference($package).PHP_EOL;
     }
-    if (Composer\InstalledVersions::getReference('shippercli/provider-easypanel') !== 'd74d5411f2ba99b7dd1e6d990badc24353c03a3e') {
+    if (Composer\InstalledVersions::getReference('shippercli/provider-easypanel') !== 'd28bd36a0390ce15f3c65e8fcd46f5e712be71a6') {
         throw new RuntimeException('Unexpected published EasyPanel source reference.');
     }
     $runShipper(['validate']);

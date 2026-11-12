@@ -37,17 +37,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  reject-published-scheduler:
-    if: github.event_name == 'workflow_dispatch' && inputs.published && inputs.scheduler
+  reject-worker-and-scheduler:
+    if: github.event_name == 'workflow_dispatch' && inputs.worker && inputs.scheduler
     runs-on: ubuntu-latest
     steps:
       - run: |
-          echo '::error::The scheduler fixture requires a source checkout. Dispatch with published=false.'
+          echo '::error::Dispatch with either worker or scheduler enabled.'
           exit 1
 
   disposable-lifecycle:
     if: >-
-      inputs.published != true &&
+      inputs.published != true && !(inputs.worker && inputs.scheduler) &&
       (github.ref == 'refs/heads/main' ||
        (github.event_name == 'workflow_dispatch' &&
         (github.ref == 'refs/heads/audit/2026-10-14-fixes' ||
@@ -75,8 +75,8 @@ jobs:
 
   published-lifecycle:
     if: >-
-      github.event_name == 'workflow_dispatch' && inputs.published && !inputs.scheduler &&
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/easypanel-worker-release')
+      github.event_name == 'workflow_dispatch' && inputs.published && !(inputs.worker && inputs.scheduler) &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/easypanel-scheduler-release')
     runs-on: ubuntu-latest
     timeout-minutes: 12
     strategy:
@@ -88,7 +88,7 @@ jobs:
       - uses: actions/checkout@v5
       - name: Prepare the disposable project configuration
         env:
-          SHIPPER_E2E_SOURCE: ${{ inputs.worker && 'worker' || inputs.source }}
+          SHIPPER_E2E_SOURCE: ${{ inputs.scheduler && 'scheduler' || inputs.worker && 'worker' || inputs.source }}
         run: |
           name="e$(openssl rand -hex 6)"
           echo "SHIPPER_E2E_PROJECT=$name" >> "$GITHUB_ENV"
@@ -116,13 +116,15 @@ jobs:
                 image: "nginx:alpine"
           YAML
               ;;
-            git)
+            git|scheduler)
+              fixture=public-git
+              if [ "$SHIPPER_E2E_SOURCE" = scheduler ]; then fixture=scheduler; fi
               cat >> published-fixture/shipper.yml <<YAML
                 type: git
                 repo: "https://github.com/shippercli/provider-easypanel.git"
                 ref: "${GITHUB_REF_NAME}"
-                path: "/tests/fixtures/public-git"
           YAML
+              printf '      path: "/tests/fixtures/%s"\n' "$fixture" >> published-fixture/shipper.yml
               ;;
             *) exit 1 ;;
           esac
@@ -136,6 +138,18 @@ jobs:
               queues:
                 default:
                   enabled: true
+          YAML
+          fi
+          if [ "$SHIPPER_E2E_SOURCE" = scheduler ]; then
+            nonce="$(openssl rand -hex 12)"
+            digest="$(printf '["%s","v1"]' "$name" | sha256sum | cut -c1-20)"
+            target="http://s-${name}-v1-${digest}_web/record/cron/$nonce"
+            echo "SHIPPER_E2E_CRON_NONCE=$nonce" >> "$GITHUB_ENV"
+            cat >> published-fixture/shipper.yml <<YAML
+              cron:
+                sample:
+                  frequency: "* * * * *"
+                  command: "curl --max-time 5 -fsS '$target' || wget -T 5 -qO- '$target'"
           YAML
           fi
           cat >> published-fixture/shipper.yml <<'YAML'
@@ -154,7 +168,7 @@ jobs:
         env:
           COMPOSER_HOME: ${{ runner.temp }}/shipper-composer
         run: |
-          composer global require --no-interaction --prefer-dist shippercli/cli:1.0.4 shippercli/provider-easypanel:2.0.2
+          composer global require --no-interaction --prefer-dist shippercli/cli:1.0.4 shippercli/provider-easypanel:2.0.3
           echo "$COMPOSER_HOME/vendor/bin" >> "$GITHUB_PATH"
       - name: Install and validate through the published Shipper Action
         if: matrix.installation == 'action'
@@ -165,12 +179,13 @@ jobs:
         with:
           command: validate
           cli-version: '1.0.4'
-          providers: shippercli/provider-easypanel:2.0.2
+          providers: shippercli/provider-easypanel:2.0.3
           working-directory: published-fixture
       - name: Verify published deployment, HTTPS, and cleanup
         working-directory: published-fixture
         env:
-          SHIPPER_E2E_SOURCE: ${{ inputs.source }}
+          SHIPPER_E2E_SOURCE: ${{ inputs.scheduler && 'git' || inputs.source }}
+          SHIPPER_E2E_SCHEDULER: ${{ inputs.scheduler }}
           SHIPPER_E2E_WORKER: ${{ inputs.worker }}
           EASYPANEL_URL: ${{ secrets.EASYPANEL_URL }}
           EASYPANEL_AUTH_TOKEN: ${{ secrets.EASYPANEL_AUTH_TOKEN }}
