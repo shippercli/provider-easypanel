@@ -9,16 +9,20 @@ $shipper = getenv('SHIPPER_E2E_BIN');
 $published = is_string($shipper) && $shipper !== '';
 $worker = getenv('SHIPPER_E2E_WORKER') === 'true';
 $scheduler = getenv('SHIPPER_E2E_SCHEDULER') === 'true';
-$mariadb = getenv('SHIPPER_E2E_MARIADB') === 'true';
+$database = getenv('SHIPPER_E2E_DATABASE') ?: 'none';
+if (! in_array($database, ['none', 'mariadb', 'postgres', 'mongo', 'redis'], true)) {
+    throw new RuntimeException('Unsupported live database fixture.');
+}
+$withDatabase = $database !== 'none';
 $sourceType = getenv('SHIPPER_E2E_SOURCE') ?: 'image';
 if ($scheduler && ($worker || $sourceType !== 'git')) {
     throw new RuntimeException('The scheduler fixture requires a public Git deployment without a queue worker.');
 }
-if ($mariadb && ($published || $worker || $scheduler || $sourceType !== 'image')) {
-    throw new RuntimeException('The MariaDB fixture requires a standalone source checkout dispatch.');
+if ($withDatabase && ($published || $worker || $scheduler || $sourceType !== 'image')) {
+    throw new RuntimeException('The database fixture requires a standalone source checkout dispatch.');
 }
 $expectedBody = match (true) {
-    $mariadb => 'shippercli-mariadb-query-ok',
+    $withDatabase => 'shippercli-'.$database.'-query-ok',
     $worker => 'ShipperCLI EasyPanel worker fixture web app',
     $scheduler => 'ShipperCLI EasyPanel scheduler fixture',
     $sourceType === 'git' => 'ShipperCLI EasyPanel public Git fixture',
@@ -61,10 +65,19 @@ $source = $sourceType === 'git' ? [
     'type' => 'image',
     'image' => 'nginx:alpine',
 ];
-if ($worker || $mariadb) {
+if ($worker || $withDatabase) {
+    $fixture = match ($database) {
+        'none' => 'worker',
+        'mariadb' => 'mariadb',
+        default => 'datastore',
+    };
+    $dockerfile = file_get_contents(__DIR__.'/fixtures/'.$fixture.'.Dockerfile');
+    if ($dockerfile === false) {
+        throw new RuntimeException('Unable to load the live Dockerfile fixture.');
+    }
     $source = [
         'type' => 'dockerfile',
-        'dockerfile' => file_get_contents(__DIR__.'/fixtures/'.($mariadb ? 'mariadb' : 'worker').'.Dockerfile'),
+        'dockerfile' => str_replace('@DATASTORE@', $database, $dockerfile),
     ];
 }
 $client = new EasyPanelClient($url, $token, timeout: 45);
@@ -76,8 +89,8 @@ $provider = new EasyPanelProvider([
     'source' => $source,
 ], $client);
 
-$project = new class($name, $worker, $scheduler, $schedulerCommand, $mariadb) {
-    public function __construct(private readonly string $name, private readonly bool $worker, private readonly bool $scheduler, private readonly string $schedulerCommand, private readonly bool $mariadb) {}
+$project = new class($name, $worker, $scheduler, $schedulerCommand, $database) {
+    public function __construct(private readonly string $name, private readonly bool $worker, private readonly bool $scheduler, private readonly string $schedulerCommand, private readonly string $database) {}
 
     public function name(): string
     {
@@ -110,10 +123,11 @@ $project = new class($name, $worker, $scheduler, $schedulerCommand, $mariadb) {
 
     public function databases(): array
     {
-        return $this->mariadb ? [new class {
+        return $this->database !== 'none' ? [new class($this->database) {
+            public function __construct(private readonly string $type) {}
             public function name(): string { return 'fixture'; }
             public function user(): string { return 'fixture'; }
-            public function type(): string { return 'mariadb'; }
+            public function type(): string { return $this->type; }
         }] : [];
     }
 
@@ -121,7 +135,7 @@ $project = new class($name, $worker, $scheduler, $schedulerCommand, $mariadb) {
     {
         return match ($section) {
             'queues' => $this->worker,
-            'databases' => $this->mariadb,
+            'databases' => $this->database !== 'none',
             'cron' => $this->scheduler,
             default => false,
         };
@@ -258,8 +272,8 @@ try {
     }
 
     echo "EasyPanel disposable deployment is ready.\n";
-    if ($mariadb) {
-        echo "EasyPanel disposable MariaDB authenticated query verified.\n";
+    if ($withDatabase) {
+        echo "EasyPanel disposable {$database} authenticated query verified.\n";
     }
     if ($worker) {
         for ($attempt = 1; $attempt <= 12; $attempt++) {
@@ -369,7 +383,7 @@ try {
     }
 } finally {
     // Omit the declared database so destroy reconciles the disposable, marker-owned service.
-    $cleanupProject = $mariadb ? new ($project::class)($name, false, false, $schedulerCommand, false) : $project;
+    $cleanupProject = $withDatabase ? new ($project::class)($name, false, false, $schedulerCommand, 'none') : $project;
     if ($published) {
         $runShipper(['destroy', $name, '--profile=v1', '--force']);
     } elseif (! $provider->destroy($cleanupProject, $profile)) {
