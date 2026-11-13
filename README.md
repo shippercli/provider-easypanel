@@ -156,6 +156,11 @@ source:
 
 The repository must be accessible to the GitHub integration configured in EasyPanel.
 
+Live deployment through this integration remains unverified. The test panel
+returned HTTP 400 when starting a deployment after saving the GitHub source.
+For public repositories, the HTTPS Git source shown above passed live deployment
+and cleanup through both the published Composer and GitHub Action install paths.
+
 ### Inline Dockerfile
 
 ```yaml
