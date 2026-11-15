@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ShipperCli\ProviderEasyPanel\Tests;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use ShipperCli\ProviderEasyPanel\EasyPanelClient;
 
@@ -194,5 +195,201 @@ final class EasyPanelClientTest extends TestCase
         self::assertStringNotContainsString('private-panel.example.com', $debugOutput);
         self::assertStringNotContainsString('private-token', $debugOutput);
         self::assertSame(2, substr_count($debugOutput, '[redacted]'));
+    }
+
+    public static function mismatchedIdentities(): array
+    {
+        $cases = [];
+        foreach (['app', 'box', 'mysql'] as $type) {
+            foreach ([['projectName', 'other'], ['projectName', null], ['name', 'other'],
+                ['serviceName', 'other'], ['type', 'other'], ['name', ['synthetic-secret']]] as [$key, $value]) {
+                $cases[] = [$type, $key, $value];
+            }
+        }
+        return $cases;
+    }
+
+    private function inspect(EasyPanelClient $client, string $type): array
+    {
+        return match ($type) {
+            'app' => $client->inspectAppService('fixture', 'target'),
+            'box' => $client->inspectBoxService('fixture', 'target'),
+            default => $client->inspectDatabaseService($type, 'fixture', 'target'),
+        };
+    }
+
+    #[DataProvider('mismatchedIdentities')]
+    public function testExplicitIdentityMustMatchRequest(string $type, string $key, mixed $value): void
+    {
+        $data = ['env' => 'SHIPPERCLI_MANAGED=1', $key => $value];
+        $client = new EasyPanelClient('https://example.test', 'synthetic', transport: fn () => $data);
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('inspection identity');
+        $this->inspect($client, $type);
+    }
+
+    public function testMatchedAndOmittedOptionalIdentitiesRemainSupported(): void
+    {
+        foreach (['app', 'box', 'mysql'] as $type) {
+            foreach ([['env' => 'fixture'], ['projectName' => 'fixture', 'name' => 'target', 'serviceName' => 'target', 'type' => $type, 'env' => 'fixture']] as $data) {
+                $client = new EasyPanelClient('https://example.test', 'synthetic', transport: fn () => $data);
+                self::assertSame($data, $this->inspect($client, $type));
+            }
+        }
+    }
+
+    public static function invalidInventories(): array
+    {
+        $project = ['name' => 'fixture'];
+        $service = ['projectName' => 'fixture', 'name' => 'app', 'type' => 'app'];
+        return [
+            'duplicate projects' => [['projects' => [$project, $project], 'services' => []]],
+            'padded project' => [['projects' => [['name' => ' fixture']], 'services' => []]],
+            'duplicate services' => [['projects' => [$project], 'services' => [$service, $service]]],
+            'conflicting types' => [['projects' => [$project], 'services' => [$service, [...$service, 'type' => 'mysql']]]],
+            'orphan' => [['projects' => [], 'services' => [$service]]],
+            'padded service' => [['projects' => [$project], 'services' => [[...$service, 'name' => ' app']]]],
+            'padded parent' => [['projects' => [$project], 'services' => [[...$service, 'projectName' => 'fixture ']]]],
+            'padded type' => [['projects' => [$project], 'services' => [[...$service, 'type' => 'app ']]]],
+        ];
+    }
+
+    #[DataProvider('invalidInventories')]
+    public function testRejectsAmbiguousInventories(array $inventory): void
+    {
+        $client = new EasyPanelClient('https://example.test', 'synthetic', transport: fn () => $inventory);
+        $this->expectException(\RuntimeException::class);
+        $client->listProjectsAndServices();
+    }
+
+    public function testServiceNamesAreScopedToProjects(): void
+    {
+        $inventory = ['projects' => [['name' => 'first'], ['name' => 'second']], 'services' => [
+            ['projectName' => 'first', 'name' => 'app', 'type' => 'app'],
+            ['projectName' => 'second', 'name' => 'app', 'type' => 'app'],
+        ]];
+        $client = new EasyPanelClient('https://example.test', 'synthetic', transport: fn () => $inventory);
+        self::assertSame($inventory, $client->listProjectsAndServices());
+    }
+
+    public static function invalidInspections(): array
+    {
+        $cases = [];
+        foreach (['app', 'box', 'mysql'] as $type) {
+            foreach ([null, false, 'synthetic-secret', [['env' => 'synthetic-secret']]] as $data) $cases[] = [$type, $data];
+        }
+        return $cases;
+    }
+
+    #[DataProvider('invalidInspections')]
+    public function testInspectionsDoNotNormalizeUnreadableData(string $type, mixed $data): void
+    {
+        $client = new EasyPanelClient('https://example.test', 'synthetic', transport: fn () => $data);
+        $this->expectException(\RuntimeException::class);
+        match ($type) {
+            'app' => $client->inspectAppService('fixture', 'app'),
+            'box' => $client->inspectBoxService('fixture', 'worker'),
+            'mysql' => $client->inspectDatabaseService('mysql', 'fixture', 'db'),
+        };
+    }
+
+    public static function invalidDomains(): array
+    {
+        return array_map(fn ($data) => [$data], [null, false, 'synthetic-secret',
+            ['named' => ['host' => 'fixture.test']], [[]], [['host' => '']], [['host' => ' fixture.test']]]);
+    }
+
+    #[DataProvider('invalidDomains')]
+    public function testUnreadableDomainsCannotBecomeEmptyInventory(mixed $data): void
+    {
+        $client = new EasyPanelClient('https://example.test', 'synthetic', transport: fn () => $data);
+        $this->expectException(\RuntimeException::class);
+        $client->listDomains('fixture', 'app');
+    }
+
+    public function testValidDomainsAndInspectionsArePreserved(): void
+    {
+        foreach ([[], [['host' => 'fixture.test', 'path' => '/']], [['host' => 'fixture.test', 'path' => '/a'], ['host' => 'fixture.test', 'path' => '/b']]] as $data) {
+            $client = new EasyPanelClient('https://example.test', 'synthetic', transport: fn () => $data);
+            self::assertSame($data, $client->listDomains('fixture', 'app'));
+        }
+        $data = ['env' => 'SHIPPERCLI_MANAGED=1'];
+        $client = new EasyPanelClient('https://example.test', 'synthetic', transport: fn () => $data);
+        self::assertSame($data, $client->inspectAppService('fixture', 'app'));
+        self::assertSame($data, $client->inspectBoxService('fixture', 'worker'));
+        self::assertSame($data, $client->inspectDatabaseService('mysql', 'fixture', 'db'));
+    }
+
+    public static function invalidEnvelopes(): array
+    {
+        return array_map(fn ($body) => [$body], [
+            '{}', '[]', 'null', '42', '"synthetic-secret"',
+            '{"error":{"json":{"message":"synthetic-secret"}}}',
+            '{"json":null,"error":{"message":"synthetic-secret"}}',
+            '{"json":null,"errors":["synthetic-secret"]}',
+            '{"json":null,"success":false}',
+            '{"result":{"data":"synthetic-secret"}}',
+            '{"result":{"data":{"json":null},"error":"synthetic-secret"}}',
+            '{"json":null,"result":{"data":{"json":null}}}',
+            '{"json":',
+        ]);
+    }
+
+    #[DataProvider('invalidEnvelopes')]
+    public function testInvalidEnvelopesFailSafely(string $body): void
+    {
+        $client = new EasyPanelClient('https://example.test', 'synthetic');
+        $failure = null;
+        try {
+            (new \ReflectionMethod($client, 'decodeResponse'))->invoke($client, $body, 'fixture');
+        } catch (\Throwable $exception) { $failure = $exception; }
+        self::assertInstanceOf(\RuntimeException::class, $failure);
+        self::assertStringNotContainsString('synthetic-secret', $failure->getMessage());
+        self::assertNull($failure->getPrevious());
+    }
+
+    public function testValidNullMutationPayloadsAreExplicit(): void
+    {
+        $client = new EasyPanelClient('https://example.test', 'synthetic');
+        foreach (['{"json":null}', '{"result":{"data":{"json":null}}}'] as $body) {
+            self::assertNull((new \ReflectionMethod($client, 'decodeResponse'))->invoke($client, $body, 'fixture'));
+        }
+    }
+
+    public function test_running_containers_must_match_the_exact_managed_service(): void
+    {
+        $project = 'fixture';
+        $service = 'app';
+        $containers = [
+            (object) ['State' => 'running', 'Labels' => (object) ['com.docker.swarm.service.name' => 'other_app']],
+            (object) ['State' => 'exited', 'Labels' => (object) ['com.docker.swarm.service.name' => 'fixture_app']],
+        ];
+        $client = new EasyPanelClient(
+            'https://panel.example.test',
+            'synthetic',
+            transport: static function (string $procedure, array $input) use (&$containers): array {
+                self::assertSame('getDockerContainers', $procedure);
+                self::assertSame(['service' => 'fixture_app'], $input);
+
+                return $containers;
+            },
+        );
+
+        self::assertFalse($client->hasRunningAppContainer($project, $service));
+        $containers[] = (object) ['State' => 'running', 'Labels' => (object) ['com.docker.swarm.service.name' => 'fixture_app']];
+        self::assertTrue($client->hasRunningAppContainer($project, $service));
+    }
+
+    public function test_database_payload_cannot_override_target_identity(): void
+    {
+        $client = new EasyPanelClient(
+            'https://panel.example.test',
+            'synthetic',
+            transport: static fn () => self::fail('An invalid target must be rejected before transport.'),
+        );
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('must not override the target identity');
+        $client->createDatabaseService('mysql', 'fixture', 'main', ['serviceName' => 'other']);
     }
 }
