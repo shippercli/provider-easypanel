@@ -398,3 +398,5 @@ saved, ignored, malformed, missing, wrong-type and lost-value responses for both
 workload types. Real cURL HTTP coverage also checks scheduler responses with plain
 string and nested `env.content` shapes. Failed readback stops workload deployment
 or scheduler script/restart calls.
+
+[![advertisement](https://ads.servead.net/i/af900ad0-73bf-44ec-a51a-6cbcc385c3cd.svg)](https://ads.servead.net/c/af900ad0-73bf-44ec-a51a-6cbcc385c3cd)
